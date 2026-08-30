@@ -100,6 +100,9 @@
   .nmo-pane{min-width:0}.nmo-pane canvas{width:100%;height:auto;image-rendering:auto}.nmo-pane .hint{margin-top:4px}
   .nmo-pane{padding:4px;background:#11161d;border:1px solid #202832;border-radius:5px}
   .nmo-pane .ttl{margin:0 0 7px 2px}
+  .analysis-grid{display:grid;grid-template-columns:minmax(420px,1.45fr) minmax(300px,1fr);gap:12px;margin:12px 0;align-items:start}
+  .analysis-grid canvas{width:100%;height:auto}
+  @media(max-width:1050px){.analysis-grid{grid-template-columns:1fr}}
   .progress{height:6px;background:#252c35;border-radius:4px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--acc)}
   .empty{padding:24px;text-align:center;color:var(--dim);border:1px dashed var(--line);border-radius:6px}
   @media(max-width:1450px){.stage-grid{grid-template-columns:1fr}}
@@ -232,6 +235,7 @@
         <div class="subtabs">
           <button id="tabCommonShot" class="tab on">Common Shot</button>
           <button id="tabCommonReceiver" class="tab">Common Receiver</button>
+          <button id="tabSpectrum" class="tab">Spectrum &amp; Filter</button>
         </div>
         <div id="commonShotView">
           <p class="ttl">Common shot gathers</p>
@@ -243,6 +247,20 @@
           <div class="toolbar"><label>Receiver <select id="receiverSelect"></select></label><label>Axis <select id="receiverAxis"><option value="offset">Signed offset</option><option value="shot">Shot position</option></select></label></div>
           <div class="hint" id="receiverInfo">Acquire shots to build a common receiver gather.</div>
           <canvas id="receiverGather" class="selected-gather" width="1100" height="660" aria-label="Common receiver gather"></canvas>
+        </div>
+        <div id="spectrumView" style="display:none">
+          <div class="toolbar">
+            <label><input type="checkbox" id="filterOn"> Apply bandpass to all traces</label>
+            <label>f1 <input type="number" id="fc1" value="5" min="0" step="1" style="width:62px"></label>
+            <label>f2 <input type="number" id="fc2" value="10" min="0" step="1" style="width:62px"></label>
+            <label>f3 <input type="number" id="fc3" value="45" min="1" step="1" style="width:62px"></label>
+            <label>f4 <input type="number" id="fc4" value="60" min="1" step="1" style="width:62px"></label>
+            <button id="applyFilter">Apply corners</button>
+            <label>Gather <select id="spectrumSource"><option value="shot">Selected shot</option><option value="cmp">Selected CMP</option></select></label>
+          </div>
+          <canvas id="spectrumCanvas" class="selected-gather" width="1100" height="420" aria-label="Mean amplitude spectrum and bandpass response"></canvas>
+          <div class="hint" id="spectrumInfo">Acquire shots to see an amplitude spectrum.</div>
+          <div class="note">The bandpass is zero phase and applied when the trace database is built, so the CMP gathers, semblance, NMO and the final stack all see filtered data. Raw samples are retained for this comparison.</div>
         </div>
       </div>
     </section>
@@ -296,6 +314,18 @@
           <div class="nmo-pane"><p class="ttl">NMO corrected CMP</p><canvas id="nmoCor" width="720" height="920"></canvas><div class="hint">amber = muted / invalid</div></div>
           <div class="nmo-pane"><p class="ttl">Stack</p><canvas id="nmoStk" width="340" height="920"></canvas><div class="hint">live-fold mean</div></div>
         </div>
+        <div class="analysis-grid">
+          <div class="nmo-pane">
+            <p class="ttl">Constant-velocity stacks</p>
+            <canvas id="cvsCanvas" width="900" height="430" aria-label="Constant velocity stack panels"></canvas>
+            <div class="hint" id="cvsInfo">Click a panel to pick that velocity at the current t₀.</div>
+          </div>
+          <div class="nmo-pane">
+            <p class="ttl">Dix interval velocities</p>
+            <canvas id="dixCanvas" width="560" height="430" aria-label="Dix interval velocity inversion"></canvas>
+            <div class="hint" id="dixInfo">Pick velocities, or switch to Model RMS, to invert.</div>
+          </div>
+        </div>
         <div class="note" id="hyperbolaInfo">Red = active NMO hyperbola. Gold = exact layered-model reference.</div>
         <div class="nmoctl wide">
           <div class="hint">Click semblance to add a (t₀, v) pick; shift-click near a pick to delete it. Click the raw CMP to move the predicted hyperbola.</div>
@@ -311,6 +341,9 @@
           <div class="toolbar">
             <button id="vAuto">Show Model RMS</button><button id="vAutoPick">Auto-pick peaks</button><button id="vClear">Clear picks</button>
             <label>Stretch mute <select id="stretchMute"><option value="off">OFF</option><option value="0.3">30%</option><option value="0.5" selected>50%</option><option value="0.75">75%</option><option value="1">100%</option></select></label>
+            <label><input type="checkbox" id="topMuteOn"> top mute</label>
+            <label>mute t₀ <input class="compact-range" type="range" id="muteT0" min="0" max="0.5" step="0.01" value="0.06"><span id="muteT0Lbl" class="metric">0.06 s</span></label>
+            <label>mute vel <input class="compact-range" type="range" id="muteVel" min="600" max="6000" step="50" value="1800"><span id="muteVelLbl" class="metric">1800 m/s</span></label>
             <label><input type="checkbox" id="nmoDensity" checked> variable-density backdrop</label>
             <label><input type="checkbox" id="exactMoveout" checked> exact layered-model curve</label>
           </div>
@@ -325,10 +358,12 @@
           <label>All-CMP velocity <select id="allVelocity"><option value="model">Model RMS at each CMP</option><option value="shared">Apply reference CMP velocity to all CMPs</option></select></label>
           <label>Minimum fold <select id="minFold"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
           <button id="processAll" class="on">NMO + Stack All CMPs</button>
+          <button id="migrateBtn">Migrate stack</button>
+          <label>Aperture <input type="number" id="migAperture" value="800" min="50" step="50" style="width:74px"> m</label>
           <label><input type="checkbox" id="finalWiggle" checked> Wiggle overlay</label>
           <label>Display gain <input class="compact-range" type="range" id="finalGain" min="0.5" max="4" step="0.1" value="1.6"><span id="finalGainLbl" class="metric">1.6×</span></label>
           <label>Time gain <select id="finalTimeGain"><option value="none">None</option><option value="sqrt" selected>√t compensation</option><option value="linear">t compensation</option></select></label>
-          <span class="view-switch" role="group" aria-label="Final section comparison view"><button id="finalViewStack" class="on" aria-pressed="true">Stack</button><button id="finalViewModel" aria-pressed="false">Model TWT</button></span>
+          <span class="view-switch" role="group" aria-label="Final section comparison view"><button id="finalViewStack" class="on" aria-pressed="true">Stack</button><button id="finalViewMigrated" aria-pressed="false">Migrated</button><button id="finalViewModel" aria-pressed="false">Model TWT</button></span>
           <label><input type="checkbox" id="finalFlip"> Flip-flop</label>
         </div>
         <p class="ttl" id="finalTitle">CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span></p>
@@ -654,17 +689,25 @@ function finalizeShot(){
   updateFlow();
 }
 
+let dataVersion=0;
 function buildTraceDatabase(){
-  acquisitionTraces=[];
+  acquisitionTraces=[];dataVersion++;cvsCache=null;
   shotRecords.forEach(shot=>shot.receivers.forEach((receiver,k)=>{
     const sourceX=shot.sourceX, receiverX=receiver.x;
     const sourceReceiverOffset=receiverX-sourceX;
     const midpointX=(sourceX+receiverX)/2;
+    // Everything downstream reads `samples`, so applying the filter here means
+    // the CMP gathers, semblance, NMO and stack all see filtered data without
+    // any of them knowing a filter exists. `rawSamples` is kept for the
+    // before/after spectrum display.
+    const raw=shot.traces[k];
     acquisitionTraces.push({
       shotId:shot.id, receiverId:receiver.id,
       sourceI:shot.sourceI, sourceX, receiverI:receiver.i, receiverX,
       midpointX, sourceReceiverOffset, halfOffset:sourceReceiverOffset/2,
-      samples:shot.traces[k], dt:shot.dt, nt:shot.nt
+      rawSamples:raw,
+      samples:filterEnabled&&validFilterCorners(filterCorners)?bandpassFilter(raw,shot.dt,filterCorners):raw,
+      dt:shot.dt, nt:shot.nt
     });
   }));
 }
@@ -704,7 +747,7 @@ function buildCmpBins(selectBest=true){
     selectedCmpIndex=bestCmpIndex(keys);
   }
   if(!keys.length) selectedCmpIndex=null;
-  sembDirty=true; finalStacks.clear(); finalRange=null;
+  sembDirty=true; finalStacks.clear(); migratedStacks.clear(); finalRange=null;
   drawCmpViews(); drawAcquisitionViews(); drawFinalSection();
 }
 
@@ -980,6 +1023,79 @@ function drawGray(){
   grc.fillText(`${offFar.toFixed(0)} m`,W-R-fw,13);
 }
 
+/* ---------------- spectra and bandpass ---------------- */
+/* Iterative radix-2 Cooley-Tukey FFT, in place, length a power of two.
+   Everything frequency-domain in this page goes through it: the amplitude
+   spectrum display and the zero-phase bandpass applied to the traces. */
+function nextPow2(n){let p=1;while(p<n)p<<=1;return p;}
+
+function fftRadix2(re,im,inverse){
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1)j^=bit;
+    j^=bit;
+    if(i<j){const tr=re[i];re[i]=re[j];re[j]=tr;const ti=im[i];im[i]=im[j];im[j]=ti;}
+  }
+  for(let len=2;len<=n;len<<=1){
+    const half=len>>1,ang=(inverse?2:-2)*Math.PI/len,wr=Math.cos(ang),wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let cr=1,ci=0;
+      for(let k=0;k<half;k++){
+        const ur=re[i+k],ui=im[i+k],ar=re[i+k+half],ai=im[i+k+half];
+        const vr=ar*cr-ai*ci,vi=ar*ci+ai*cr;
+        re[i+k]=ur+vr;im[i+k]=ui+vi;
+        re[i+k+half]=ur-vr;im[i+k+half]=ui-vi;
+        const ncr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=ncr;
+      }
+    }
+  }
+  if(inverse)for(let i=0;i<n;i++){re[i]/=n;im[i]/=n;}
+}
+
+function amplitudeSpectrum(samples,dt){
+  const n=nextPow2(samples.length),re=new Float64Array(n),im=new Float64Array(n);
+  for(let i=0;i<samples.length;i++)re[i]=samples[i];
+  fftRadix2(re,im,false);
+  const half=n>>1,amp=new Float64Array(half);
+  for(let k=0;k<half;k++)amp[k]=Math.hypot(re[k],im[k]);
+  return {amp,df:1/(n*dt)};
+}
+
+/* Ormsby trapezoid with raised-cosine ramps rather than straight sides: the
+   gentler corners keep the filtered wavelet from ringing the way a boxcar
+   passband does. */
+function ormsbyWeight(f,corners){
+  const f1=corners[0],f2=corners[1],f3=corners[2],f4=corners[3];
+  if(f<=f1||f>=f4)return 0;
+  if(f<f2)return f2>f1?.5-.5*Math.cos(Math.PI*(f-f1)/(f2-f1)):1;
+  if(f<=f3)return 1;
+  return f4>f3?.5-.5*Math.cos(Math.PI*(f4-f)/(f4-f3)):1;
+}
+
+/* Zero phase by construction: an identical real weight is applied to each bin
+   and its conjugate partner, so the inverse transform comes back real and the
+   wavelet is not shifted in time. The transform is padded to twice the trace
+   length so the circular convolution cannot wrap the end onto the start. */
+function bandpassFilter(samples,dt,corners){
+  const n=nextPow2(samples.length*2),re=new Float64Array(n),im=new Float64Array(n);
+  for(let i=0;i<samples.length;i++)re[i]=samples[i];
+  fftRadix2(re,im,false);
+  const df=1/(n*dt),half=n>>1;
+  for(let k=0;k<=half;k++){
+    const w=ormsbyWeight(k*df,corners);
+    re[k]*=w;im[k]*=w;
+    if(k>0&&k<half){const m=n-k;re[m]*=w;im[m]*=w;}
+  }
+  fftRadix2(re,im,true);
+  const out=new Float32Array(samples.length);
+  for(let i=0;i<samples.length;i++)out[i]=re[i];
+  return out;
+}
+
+let filterEnabled=false,filterCorners=[5,10,45,60];
+function validFilterCorners(c){return c.length===4&&c.every(v=>Number.isFinite(v)&&v>=0)&&c[0]<c[1]&&c[1]<c[2]&&c[2]<c[3];}
+
 /* A colocated source/receiver can produce one very large direct-arrival trace.
    Using that single maximum to scale every trace makes interior shots look
    artificially weak. Use a robust upper quartile of per-trace peaks instead,
@@ -1054,6 +1170,15 @@ function drawTraceGather(canvas,records,options={}){
     }
     ctx.putImageData(image,L,T);
   }
+  if(options.muteCurve){
+    const muteY=r=>T+Math.max(0,Math.min(duration,options.muteCurve(r)))/duration*ph;
+    ctx.fillStyle='rgba(255,179,92,.15)';ctx.beginPath();ctx.moveTo(L,T);
+    ordered.forEach((r,k)=>ctx.lineTo(L+dxTr*(k+.5),muteY(r)));
+    ctx.lineTo(L+pw,T);ctx.closePath();ctx.fill();
+    ctx.strokeStyle='#ffb35c';ctx.lineWidth=1.4;ctx.setLineDash([6,3]);ctx.beginPath();
+    ordered.forEach((r,k)=>{const x=L+dxTr*(k+.5),y=muteY(r);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.stroke();ctx.setLineDash([]);
+  }
   ctx.strokeStyle='#232a33';ctx.fillStyle='#8a949f';ctx.font=options.compact?'9px ui-sans-serif':'10px ui-sans-serif';
   const tick=duration>1.8?.4:.2;
   for(let s=0;s<=duration+1e-6;s+=tick){const y=T+s/duration*ph;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(W-R,y);ctx.stroke();ctx.fillText(s.toFixed(1),3,y+3);}
@@ -1126,6 +1251,85 @@ function upsertShotCard(shot){
   card.addEventListener('click',e=>{if(e.target!==cv){selectedShotId=shot.id;drawAcquisitionViews();refreshShotGallery();}});
 }
 
+/* Mean amplitude spectrum of a gather, shown raw against filtered with the
+   filter response drawn over it, so the effect of moving a corner is visible
+   before it is committed to the whole database. */
+function meanSpectrum(records,key){
+  let sum=null,df=0;
+  records.forEach(record=>{
+    const spec=amplitudeSpectrum(record[key]||record.samples,record.dt);
+    if(!sum){sum=new Float64Array(spec.amp.length);df=spec.df;}
+    const n=Math.min(sum.length,spec.amp.length);
+    for(let k=0;k<n;k++)sum[k]+=spec.amp[k];
+  });
+  if(!sum)return null;
+  for(let k=0;k<sum.length;k++)sum[k]/=records.length;
+  return {amp:sum,df};
+}
+
+function drawSpectrum(){
+  const cv=document.getElementById('spectrumCanvas'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  const L=60,R=18,T=26,B=38,pw=W-L-R,ph=H-T-B,info=document.getElementById('spectrumInfo');
+  const source=document.getElementById('spectrumSource').value;
+  const records=source==='cmp'?selectedCmpTraces():acquisitionTraces.filter(t=>t.shotId===selectedShotId);
+  ctx.font='11px ui-sans-serif,sans-serif';
+  if(!records.length){
+    ctx.fillStyle='#8a949f';ctx.fillText('Acquire shots to see an amplitude spectrum.',L,T+20);
+    info.textContent='No traces yet.';return;
+  }
+  const dt=records[0].dt,nyquist=1/(2*dt),fMax=Math.min(nyquist,Math.max(90,filterCorners[3]*1.6));
+  const rawSpec=meanSpectrum(records,'rawSamples'),outSpec=filterEnabled?meanSpectrum(records,'samples'):null;
+  const peak=Math.max(1e-12,...rawSpec.amp);
+  const xOf=f=>L+Math.min(1,f/fMax)*pw,yOf=a=>T+ph-Math.max(0,Math.min(1,a/peak))*ph;
+
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
+  for(let f=0;f<=fMax;f+=10){const x=xOf(f);ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    if(f%20===0){ctx.textAlign='center';ctx.fillText(f.toFixed(0),x,H-16);ctx.textAlign='left';}}
+  for(let q=0;q<=4;q++){const y=T+ph*(1-q/4);ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText((q/4).toFixed(2),8,y+4);}
+  ctx.fillStyle='#8a949f';ctx.textAlign='center';ctx.fillText('frequency (Hz)',L+pw/2,H-3);ctx.textAlign='left';
+  ctx.fillText('normalised amplitude',6,14);
+
+  // filter response across the full panel height
+  if(validFilterCorners(filterCorners)){
+    ctx.strokeStyle='rgba(255,179,92,.85)';ctx.lineWidth=1.4;ctx.setLineDash([5,3]);ctx.beginPath();
+    for(let x=0;x<=pw;x++){const f=x/pw*fMax,y=T+ph-ormsbyWeight(f,filterCorners)*ph;x?ctx.lineTo(L+x,y):ctx.moveTo(L+x,y);}
+    ctx.stroke();ctx.setLineDash([]);
+    filterCorners.forEach(f=>{if(f<=fMax){const x=xOf(f);ctx.strokeStyle='rgba(255,179,92,.35)';ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();}});
+  }
+
+  const drawCurve=(spec,color,width)=>{
+    ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();
+    for(let x=0;x<=pw;x++){
+      const f=x/pw*fMax,k=Math.min(spec.amp.length-1,Math.round(f/spec.df));
+      const y=yOf(spec.amp[k]);x?ctx.lineTo(L+x,y):ctx.moveTo(L+x,y);
+    }
+    ctx.stroke();
+  };
+  drawCurve(rawSpec,'#7fd3ff',1.4);
+  if(outSpec)drawCurve(outSpec,'#7dff9b',1.6);
+
+  ctx.fillStyle='#7fd3ff';ctx.fillText('raw',L+8,T+14);
+  if(outSpec){ctx.fillStyle='#7dff9b';ctx.fillText('filtered',L+44,T+14);}
+  ctx.fillStyle='#ffb35c';ctx.fillText('filter response',L+(outSpec?110:44),T+14);
+
+  // dominant frequency of the raw gather, a useful sanity check against f0
+  let peakIndex=0;for(let k=1;k<rawSpec.amp.length;k++)if(rawSpec.amp[k]>rawSpec.amp[peakIndex])peakIndex=k;
+  info.textContent=`${records.length} traces · Nyquist ${nyquist.toFixed(0)} Hz · dominant ${(peakIndex*rawSpec.df).toFixed(1)} Hz · source wavelet ${f0} Hz · bandpass ${filterEnabled?`ON ${filterCorners.join('-')} Hz`:'OFF'}.`;
+}
+
+function spectrumViewVisible(){return document.getElementById('spectrumView').style.display!=='none';}
+
+function rebuildFilteredDatabase(message){
+  const t0=performance.now();
+  buildTraceDatabase();
+  buildCmpBins(false);
+  refreshShotGallery();drawAcquisitionViews();
+  if(spectrumViewVisible())drawSpectrum();
+  document.getElementById('stat').textContent=`${message} · ${acquisitionTraces.length} traces in ${(performance.now()-t0).toFixed(0)} ms.`;
+}
+
 function refreshShotGallery(){
   const gallery=document.getElementById('shotGallery');gallery.innerHTML='';
   if(!shotRecords.length){gallery.innerHTML='<div class="empty wide">Completed shots appear here without being erased by later shots.</div>';return;}
@@ -1147,6 +1351,7 @@ function drawAcquisitionViews(){
   const receiver=recs.find(r=>r.id===selectedReceiverId);
   document.getElementById('receiverInfo').textContent=receiver?`Common Receiver Gather · R${receiver.id} · x = ${receiver.i*DX} m · Fold = ${receiverRecords.length} shots`:'No receiver selected.';
   document.querySelectorAll('.shot-card canvas').forEach(cv=>drawTraceGather(cv,cv._traceRecords||[],{compact:true,axis:document.getElementById('shotAxis').value}));
+  if(spectrumViewVisible())drawSpectrum();
 }
 
 function renderModelFrame(){mc.clearRect(0,0,CW,CH);drawModel();}
@@ -1185,7 +1390,7 @@ function ensureSemblance(){
 }
 
 function computeSemblance(){
-  const records=selectedCmpTraces(),n=records.length;
+  const records=selectedCmpTraces(),n=records.length,mute=activeTopMute();
   if(!n){ semb=null; return; }
   const localNt=Math.min(...records.map(r=>r.nt)),localDt=records[0].dt;
   sembNT = Math.min(520, localNt);              // retain enough t0 samples for a crisp display
@@ -1204,6 +1409,7 @@ function computeSemblance(){
         for(const record of records){
           const sourceReceiverOffset=record.sourceReceiverOffset;
           const t=moveoutTime(t0,sourceReceiverOffset,v);
+          if(mute&&t<topMuteTimeFor(mute,sourceReceiverOffset)) continue;
           const f=t/record.dt + w;
           const i0=Math.floor(f);
           if(i0<0 || i0+1>=record.nt) continue;
@@ -1335,7 +1541,18 @@ function vAt(t0,midpointX=selectedCmpIndex===null?0:cmpOrigin+selectedCmpIndex*c
    here for a transparent teaching stretch mute. */
 let vnmo=2000, stretchLimit=0.5;
 
-function applyNMO(records,velocityFunction=(t0,m)=>vAt(t0,m),limit=stretchLimit,delay=sourceWaveletDelay()){
+/* Front-end (top) mute. The direct arrival and the refracted first breaks are
+   not reflections, and left in place they stack straight into the section and
+   dominate the shallow part of it. The classic remedy is a linear mute in
+   INPUT time -- everything earlier than t0 + |offset| / v_apparent is dropped
+   before NMO. Expressing it in input time matters: NMO maps output t0 to a
+   different input time per offset, so a mute defined on the corrected gather
+   would cut a different event on every trace. */
+let topMuteEnabled=false,topMuteT0=.06,topMuteVelocity=1800;
+function activeTopMute(){return topMuteEnabled?{t0:topMuteT0,velocity:topMuteVelocity}:null;}
+function topMuteTimeFor(mute,offset){return mute?mute.t0+Math.abs(offset)/Math.max(1,mute.velocity):-Infinity;}
+
+function applyNMO(records,velocityFunction=(t0,m)=>vAt(t0,m),limit=stretchLimit,delay=sourceWaveletDelay(),mute=activeTopMute()){
   if(!records||!records.length)return null;
   const correctedRecords=[],valid=[];
   records.forEach(record=>{
@@ -1345,6 +1562,7 @@ function applyNMO(records,velocityFunction=(t0,m)=>vAt(t0,m),limit=stretchLimit,
       const t0=a*record.dt;
       const velocity=velocityFunction(t0,record.midpointX);
       const t=moveoutTime(t0,sourceReceiverOffset,velocity,delay);
+      if(mute&&t<topMuteTimeFor(mute,sourceReceiverOffset)) continue;
       const f=t/record.dt;
       const i0=Math.floor(f);
       if(i0<0||i0+1>=record.nt) continue;
@@ -1532,6 +1750,169 @@ sembCan.addEventListener('click',e=>{
   }
   refreshPickList(); drawNmo(); updateFlow();
 });
+/* ---------------- constant-velocity stacks ---------------- */
+/* The other half of velocity analysis. Semblance says where the coherence is;
+   a constant-velocity stack panel shows what the stack actually looks like at
+   each trial velocity, which is how the choice is usually confirmed. Cheap to
+   build here because it is just the existing NMO and stack run N times. */
+const CVS_PANEL_COUNT=9;
+let cvsCache=null,cvsCacheKey='';
+
+function constantVelocityStacks(records,vmin,vmax,count=CVS_PANEL_COUNT){
+  if(!records||!records.length)return [];
+  const out=[];
+  for(let k=0;k<count;k++){
+    const velocity=count===1?vmin:vmin+(vmax-vmin)*k/(count-1);
+    const stack=stackOf(applyNMO(records,()=>velocity,stretchLimit));
+    if(stack)out.push({velocity,stack});
+  }
+  return out;
+}
+
+/* Rebuilding nine stacks on every redraw would make the velocity slider crawl,
+   so the panels are cached against everything that can change them. */
+function cvsPanels(){
+  const records=selectedCmpTraces();
+  const key=[selectedCmpIndex,records.length,dataVersion,sembVmin,sembVmax,stretchLimit,
+             topMuteEnabled,topMuteT0,topMuteVelocity].join('|');
+  if(cvsCacheKey===key&&cvsCache)return cvsCache;
+  cvsCacheKey=key;cvsCache=constantVelocityStacks(records,sembVmin,sembVmax);
+  return cvsCache;
+}
+
+function drawConstantVelocityStacks(){
+  const cv=document.getElementById('cvsCanvas'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  const L=44,R=10,T=26,B=32,pw=W-L-R,ph=H-T-B,panels=cvsPanels();
+  cv._cvsPanels=panels;
+  ctx.font='10px ui-sans-serif,sans-serif';
+  if(!panels.length){ctx.fillStyle='#8a949f';ctx.fillText('Build and select a CMP to compare trial velocities.',L,T+18);return;}
+  const duration=panels[0].stack.nt*panels[0].stack.dt,colW=pw/panels.length;
+  let amax=1e-9;
+  panels.forEach(panel=>{const tr=panel.stack.samples;for(let a=0;a<tr.length;a++){const v=Math.abs(tr[a]);if(v>amax)amax=v;}});
+  const amp=colW*.44/amax;
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#8a949f';
+  for(let t=0;t<=duration+1e-6;t+=.2){const y=T+t/duration*ph;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();ctx.fillText(t.toFixed(1),4,y+3);}
+  const activeVelocity=vAt(selectedHyperbolaT0,selectedCmpIndex===null?0:cmpOrigin+selectedCmpIndex*cmpBinSize);
+  panels.forEach((panel,k)=>{
+    const x0=L+colW*(k+.5),tr=panel.stack.samples;
+    const nearest=Math.abs(panel.velocity-activeVelocity)<(sembVmax-sembVmin)/(CVS_PANEL_COUNT-1)/2;
+    if(k%2===0){ctx.fillStyle='rgba(255,255,255,.025)';ctx.fillRect(L+colW*k,T,colW,ph);}
+    if(nearest){ctx.fillStyle='rgba(125,255,155,.10)';ctx.fillRect(L+colW*k,T,colW,ph);}
+    ctx.strokeStyle=nearest?'#7dff9b':'#9de4ff';ctx.lineWidth=1.1;ctx.beginPath();
+    for(let a=0;a<tr.length;a++){const y=T+a/(tr.length-1)*ph,x=x0+Math.max(-colW*.48,Math.min(colW*.48,tr[a]*amp));a?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+    ctx.stroke();
+    ctx.fillStyle=nearest?'rgba(125,255,155,.34)':'rgba(127,211,255,.30)';ctx.beginPath();ctx.moveTo(x0,T);
+    for(let a=0;a<tr.length;a++)ctx.lineTo(x0+Math.max(0,Math.min(colW*.48,tr[a]*amp)),T+a/(tr.length-1)*ph);
+    ctx.lineTo(x0,T+ph);ctx.closePath();ctx.fill();
+    ctx.fillStyle=nearest?'#7dff9b':'#8a949f';ctx.textAlign='center';
+    ctx.fillText(panel.velocity.toFixed(0),x0,H-10);ctx.textAlign='left';
+  });
+  ctx.fillStyle='#8a949f';ctx.fillText('trial stacking velocity (m/s) →',L,14);
+  ctx.fillText(`t₀ ${selectedHyperbolaT0.toFixed(2)} s`,L+pw-70,14);
+}
+
+/* ---------------- Dix inversion ---------------- */
+/* RMS (stacking) velocities describe the whole column above a reflector. The
+   layer velocities are recovered between successive picks with Dix:
+       v_int^2 = (v2^2 t2 - v1^2 t1) / (t2 - t1)
+   Two details matter. The times must be PHYSICAL two-way times, so the causal
+   source-wavelet delay carried by every displayed t0 comes off first. And the
+   formula is famously unstable -- a small picking error, or two picks too close
+   together in time, drives the radicand negative. That failure is not hidden
+   here: an unstable interval is reported as unstable, which is the practical
+   lesson of Dix. */
+function dixIntervals(points,delay=sourceWaveletDelay()){
+  const sorted=points.slice().sort((a,b)=>a.t0-b.t0),out=[];
+  for(let k=0;k<sorted.length-1;k++){
+    const top=sorted[k],base=sorted[k+1];
+    const t1=Math.max(0,top.t0-delay),t2=Math.max(0,base.t0-delay);
+    const entry={top:top.t0,base:base.t0,t1,t2,v1:top.v,v2:base.v,interval:null,stable:false,reason:''};
+    if(t2-t1<=1e-6){entry.reason='interval too thin';out.push(entry);continue;}
+    const numerator=base.v*base.v*t2-top.v*top.v*t1;
+    if(numerator<=0){entry.reason='negative radicand';out.push(entry);continue;}
+    entry.interval=Math.sqrt(numerator/(t2-t1));entry.stable=true;
+    out.push(entry);
+  }
+  return out;
+}
+
+/* Control points of whatever velocity function is currently driving NMO. For
+   manual picks the column above the first pick is unconstrained, so it is
+   anchored at the datum with the first picked velocity -- the usual assumption,
+   and the reason the shallowest Dix interval is the least trustworthy. */
+function dixSourcePoints(){
+  const delay=sourceWaveletDelay();
+  if(velocitySource==='model'&&selectedCmpIndex!==null)return modelRmsFunctionAt(cmpOrigin+selectedCmpIndex*cmpBinSize);
+  if(velocitySource==='manual'&&picks.length){
+    const sorted=picks.slice().sort((a,b)=>a.t0-b.t0),points=sorted.map(p=>({t0:p.t0,v:p.v}));
+    if(points[0].t0>delay+1e-6)points.unshift({t0:delay,v:points[0].v});
+    return points;
+  }
+  return [];
+}
+
+function drawDixPanel(){
+  const cv=document.getElementById('dixCanvas'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  const L=44,R=12,T=26,B=34,pw=W-L-R,ph=H-T-B,info=document.getElementById('dixInfo');
+  ctx.font='10px ui-sans-serif,sans-serif';
+  const points=dixSourcePoints(),intervals=dixIntervals(points);
+  const xOf=v=>L+Math.max(0,Math.min(1,(v-sembVmin)/(sembVmax-sembVmin)))*pw;
+  const yOf=t=>T+Math.max(0,Math.min(1,t/tmax))*ph;
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#8a949f';
+  for(let t=0;t<=tmax+1e-6;t+=.2){const y=yOf(t);ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();ctx.fillText(t.toFixed(1),4,y+3);}
+  ctx.fillText(String(sembVmin),L,H-8);
+  const farLabel=sembVmax+' m/s';ctx.fillText(farLabel,L+pw-ctx.measureText(farLabel).width,H-8);
+  ctx.fillText('velocity →',L,14);
+
+  // true interval velocities from the model, as a step function in time
+  if(selectedCmpIndex!==null){
+    const centre=cmpOrigin+selectedCmpIndex*cmpBinSize,segments=modelVerticalSegmentsAt(centre);
+    let t=sourceWaveletDelay();
+    ctx.strokeStyle='#ffc857';ctx.lineWidth=1.4;ctx.setLineDash([4,3]);ctx.beginPath();
+    segments.forEach(segment=>{
+      const x=xOf(segment.velocity);
+      ctx.moveTo(x,yOf(t));ctx.lineTo(x,yOf(t+segment.intervalT));t+=segment.intervalT;
+    });
+    ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#ffc857';ctx.fillText('true model interval',L+4,T+12);
+  }
+
+  if(!points.length){
+    ctx.fillStyle='#8a949f';ctx.fillText('Pick velocities, or switch to Model RMS, to invert.',L+4,T+30);
+    info.textContent='Dix needs at least two RMS control points. Pick on the semblance panel, or choose Model-derived RMS.';
+    return;
+  }
+
+  // the RMS function the picks describe
+  ctx.strokeStyle='#7dff9b';ctx.lineWidth=1.5;ctx.beginPath();
+  points.forEach((point,k)=>{const x=xOf(point.v),y=yOf(point.t0);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.stroke();
+  points.forEach(point=>{ctx.fillStyle='#7dff9b';ctx.beginPath();ctx.arc(xOf(point.v),yOf(point.t0),3.5,0,7);ctx.fill();});
+  ctx.fillStyle='#7dff9b';ctx.fillText('picked RMS',L+4,T+26);
+
+  // Dix intervals as a step function, unstable ones flagged in red
+  intervals.forEach(entry=>{
+    const yTop=yOf(entry.top),yBase=yOf(entry.base);
+    if(entry.stable){
+      const x=xOf(entry.interval);
+      ctx.strokeStyle='#ff9d4d';ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(x,yTop);ctx.lineTo(x,yBase);ctx.stroke();
+    }else{
+      ctx.strokeStyle='rgba(255,107,107,.85)';ctx.lineWidth=1.4;ctx.setLineDash([3,3]);
+      ctx.beginPath();ctx.moveTo(L,(yTop+yBase)/2);ctx.lineTo(L+pw,(yTop+yBase)/2);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle='#ff6b6b';ctx.fillText('unstable: '+entry.reason,L+6,(yTop+yBase)/2-3);
+    }
+  });
+  ctx.fillStyle='#ff9d4d';ctx.fillText('Dix interval',L+4,T+40);
+
+  const stable=intervals.filter(entry=>entry.stable);
+  const summary=stable.map(entry=>`${entry.top.toFixed(2)}–${entry.base.toFixed(2)} s → ${entry.interval.toFixed(0)} m/s`).join(' · ');
+  const unstable=intervals.length-stable.length;
+  info.textContent=(summary||'No stable interval yet.')+(unstable?` · ${unstable} unstable interval${unstable===1?'':'s'} (picks too close in time, or RMS decreasing with depth).`:'')+
+    ' Gold is the true interval velocity of the model at this midpoint.';
+}
+
 function drawNmo(){
   const records=selectedCmpTraces();
   document.getElementById('nmoCmpTitle').textContent=selectedCmpIndex===null?'No CMP selected':
@@ -1539,13 +1920,16 @@ function drawNmo(){
   drawNmoCmpScheme();
   if(!records.length){
     [document.getElementById('nmoRaw'),document.getElementById('nmoCor'),document.getElementById('nmoStk')].forEach(cv=>drawTraceGather(cv,[],{empty:'Build and select a CMP'}));
-    sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);return;
+    sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);
+    drawConstantVelocityStacks();drawDixPanel();return;
   }
   ensureSemblance();drawSemb();
   const result=nmoTraces(),stack=stackOf(result),midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,displayAmax=robustGatherAmplitude(records),activeVelocity=vAt(selectedHyperbolaT0,midpointX);
   const seismicDisplay={axis:'offset',suppressCmpHighlight:true,variableDensity:nmoDensity,densityColor:true,amax:displayAmax,displayGain:nmoDisplayGain,clipTraces:true,positiveFill:false,lineWidth:1.2};
   const exactCurve=showExactMoveout&&!modelHasLateralVariation()?record=>exactModelMoveoutTime(selectedHyperbolaT0,record.sourceReceiverOffset,midpointX):null;
-  drawTraceGather(document.getElementById('nmoRaw'),records,{...seismicDisplay,traceColor:'#9de4ff',hyperbola:{t0:selectedHyperbolaT0,velocity:activeVelocity},referenceCurve:exactCurve});
+  const liveMute=activeTopMute();
+  drawTraceGather(document.getElementById('nmoRaw'),records,{...seismicDisplay,traceColor:'#9de4ff',hyperbola:{t0:selectedHyperbolaT0,velocity:activeVelocity},referenceCurve:exactCurve,
+    muteCurve:liveMute?record=>topMuteTimeFor(liveMute,record.sourceReceiverOffset):null});
   drawTraceGather(document.getElementById('nmoCor'),result.correctedRecords,{...seismicDisplay,traceColor:'#9effc5',valid:result.valid,title:'signed offset · muted shaded'});
   const base=records[0],stackRecord=stack?{...base,shotId:0,receiverId:0,sourceReceiverOffset:0,samples:stack.samples,nt:stack.nt,dt:stack.dt}:null;
   drawTraceGather(document.getElementById('nmoStk'),stackRecord?[stackRecord]:[],{axis:'offset',title:'stack',suppressCmpHighlight:true,amax:stackRecord?robustGatherAmplitude([stackRecord]):1,displayGain:Math.max(1,nmoDisplayGain*.8),clipTraces:true,traceColor:'#ffffff',fillColor:'rgba(127,211,255,.28)',lineWidth:1.5});
@@ -1554,9 +1938,26 @@ function drawNmo(){
   const residualText=residual?` · local residual RMS ${(residual.rms*1000).toFixed(0)} ms, bias ${residual.bias>=0?'+':''}${(residual.bias*1000).toFixed(0)} ms (${residual.count} traces)`:'';
   const exactText=!showExactMoveout?'gold model curve off':modelHasLateralVariation()?'gold exact curve unavailable for laterally varying interfaces':'gold = exact layered-model reference';
   document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span>`;
-  document.getElementById('nmoInfo').textContent=(stretchLimit===null?'Stretch mute is OFF.':`Muted because NMO stretch > ${Math.round(stretchLimit*100)}%; shaded samples are invalid and excluded from live fold.`)+
+  drawConstantVelocityStacks();drawDixPanel();
+  document.getElementById('nmoInfo').textContent=(liveMute?`Top mute ON: input times before ${liveMute.t0.toFixed(2)} s + |offset| / ${liveMute.velocity} m/s are removed before NMO, semblance and stack. `:'Top mute OFF: the direct arrival still stacks into the section. ')+
+    (stretchLimit===null?'Stretch mute is OFF.':`Muted because NMO stretch > ${Math.round(stretchLimit*100)}%; shaded samples are invalid and excluded from live fold.`)+
     (modelHasLateralVariation()?' Model RMS is only a teaching reference for laterally varying reflectors; DMO/migration would be required.':'');
 }
+
+document.getElementById('cvsCanvas').addEventListener('click',e=>{
+  const cv=e.currentTarget,panels=cv._cvsPanels||[];
+  if(!panels.length)return;
+  const b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*cv.width/b.width,L=44,R=10;
+  const k=Math.floor((x-L)/(cv.width-L-R)*panels.length);
+  if(k<0||k>=panels.length)return;
+  const velocity=panels[k].velocity;
+  picks=picks.filter(pick=>Math.abs(pick.t0-selectedHyperbolaT0)>1e-6);
+  picks.push({t0:selectedHyperbolaT0,v:velocity});
+  picks.sort((a,b)=>a.t0-b.t0);
+  velocitySource='manual';document.querySelector('input[name="velocitySource"][value="manual"]').checked=true;
+  document.getElementById('cvsInfo').textContent=`Picked ${velocity.toFixed(0)} m/s at t₀ ${selectedHyperbolaT0.toFixed(3)} s. Move the t₀ line on the raw CMP and pick again to build v(t).`;
+  refreshPickList();drawNmo();updateFlow();
+});
 
 document.getElementById('nmoRaw').addEventListener('click',e=>{
   const cv=e.currentTarget,b=cv.getBoundingClientRect(),y=(e.clientY-b.top)*cv.height/b.height;
@@ -1949,9 +2350,9 @@ installTracePicker(document.getElementById('cmpGather'));
 
 function processAllCMPs(){
   if(!cmpBins.size){document.getElementById('finalInfo').textContent='Build CMP gathers first.';return;}
-  stopFinalFlip(true);finalView='stack';updateFinalViewControls();
+  stopFinalFlip(true);finalView='stack';finalDataView='stack';updateFinalViewControls();
   const mode=document.getElementById('allVelocity').value,minFold=+document.getElementById('minFold').value;
-  finalStacks=new Map();const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  finalStacks=new Map();migratedStacks=new Map();finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
   keys.forEach(index=>{
     const records=cmpBins.get(index);if(records.length<minFold)return;
     const center=cmpOrigin+index*cmpBinSize;
@@ -1962,6 +2363,78 @@ function processAllCMPs(){
   finalRange={min:keys[0],max:keys[keys.length-1],minFold,mode};drawFinalSection();updateFlow();
   const velocitySummary=mode==='model'?'time-varying Model RMS at each midpoint':(picks.length?'reference CMP picked velocity':'constant velocity fallback (no reference picks)');
   document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}. Blank columns are not interpolated.`;
+}
+
+/* ---------------- post-stack time migration ---------------- */
+/* Every scattering point in the subsurface radiates a diffraction hyperbola
+   into the zero-offset section. Kirchhoff migration undoes that: for each
+   output point it sums the section along the hyperbola that a diffractor there
+   would have produced, and writes the result to the apex. Energy spread along
+   a diffraction collapses back to a point, dipping reflectors move updip to
+   their true position, and a syncline bow-tie unties.
+
+   The diffraction time reuses moveoutTime with an "offset" of twice the
+   lateral distance, so the migration, the NMO overlay and the semblance can
+   never drift apart on the causal-wavelet delay convention.
+
+   Normalisation is a weighted mean rather than a raw sum. A raw sum focuses
+   more sharply but multiplies deep, flat-hyperbola samples by the whole
+   aperture while shallow, steeply-curved ones get only a few contributions,
+   which lights up the bottom of the section for a purely geometric reason.
+   The mean keeps the collapse (off-apex outputs average incoherent samples and
+   stay small) while remaining depth balanced.
+   Amplitude treatment is deliberately incomplete: obliquity is applied, the
+   sqrt(i.omega) rho filter and geometric spreading are not. Positions are
+   right, relative amplitudes only indicative. */
+function migrateSection(stacks,range,binSize,velocityAt,aperture,delay=sourceWaveletDelay()){
+  const out=new Map();
+  if(!stacks||!stacks.size||!range)return out;
+  const indices=[...stacks.keys()].sort((a,b)=>a-b);
+  const reference=stacks.get(indices[0]).stack,nt=reference.nt,dt=reference.dt;
+  const maxLag=Math.max(1,Math.round(aperture/Math.max(1e-9,binSize)));
+  for(const outIndex of indices){
+    const source=stacks.get(outIndex),samples=new Float32Array(nt);
+    for(let a=0;a<nt;a++){
+      const t0=a*dt,physicalT0=t0-delay;
+      if(physicalT0<=0){samples[a]=source.stack.samples[a];continue;}
+      const velocity=velocityAt(t0,outIndex);
+      if(!(velocity>0))continue;
+      let sum=0,weight=0;
+      for(let lag=-maxLag;lag<=maxLag;lag++){
+        const item=stacks.get(outIndex+lag);
+        if(!item)continue;
+        const t=moveoutTime(t0,2*lag*binSize,velocity,delay);
+        const f=t/item.stack.dt,i0=Math.floor(f);
+        if(i0<0||i0+1>=item.stack.nt)continue;
+        const frac=f-i0,value=item.stack.samples[i0]*(1-frac)+item.stack.samples[i0+1]*frac;
+        const obliquity=physicalT0/Math.max(1e-9,t-delay);   // cos of the emergence angle
+        sum+=value*obliquity;weight+=obliquity;
+      }
+      samples[a]=weight>0?sum/weight:0;
+    }
+    out.set(outIndex,{index:outIndex,center:source.center,fold:source.fold,stack:{samples,nt,dt}});
+  }
+  return out;
+}
+
+let migratedStacks=new Map(),migrationAperture=800,finalDataView='stack';
+
+function migrationVelocityFunction(){
+  const mode=document.getElementById('allVelocity').value;
+  return mode==='model'
+    ?(t0,index)=>modelVAt(t0,cmpOrigin+index*cmpBinSize)
+    :(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
+}
+
+function runMigration(){
+  if(!finalStacks.size){document.getElementById('finalInfo').textContent='NMO + Stack All CMPs before migrating.';return;}
+  migrationAperture=Math.max(50,+document.getElementById('migAperture').value||800);
+  document.getElementById('migAperture').value=migrationAperture;
+  const started=performance.now();
+  migratedStacks=migrateSection(finalStacks,finalRange,cmpBinSize,migrationVelocityFunction(),migrationAperture);
+  stopFinalFlip(true);finalDataView='migrated';setFinalComparisonView('migrated');
+  const lags=Math.max(1,Math.round(migrationAperture/cmpBinSize));
+  document.getElementById('finalInfo').textContent=`Migrated ${migratedStacks.size} CMP bins in ${(performance.now()-started).toFixed(0)} ms · aperture ${migrationAperture} m (±${lags} bins) · ${document.getElementById('allVelocity').value==='model'?'model RMS':'picked/constant'} migration velocity. Compare against Stack and Model TWT.`;
 }
 
 let finalImg=null;
@@ -2029,11 +2502,23 @@ function drawFinalModelReference(ctx,L,T,pw,ph,min,max){
 }
 
 function updateFinalViewControls(){
-  const stackView=finalView==='stack',stackButton=document.getElementById('finalViewStack'),modelButton=document.getElementById('finalViewModel');
-  stackButton.classList.toggle('on',stackView);modelButton.classList.toggle('on',!stackView);
-  stackButton.setAttribute('aria-pressed',String(stackView));modelButton.setAttribute('aria-pressed',String(!stackView));
-  document.getElementById('finalTitle').innerHTML=stackView?'CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span>':'ORIGINAL MODEL — VERTICAL TIME REFERENCE <span class="view-badge">NOT MIGRATED</span>';
-  document.getElementById('finalSection').setAttribute('aria-label',stackView?'Unmigrated two-dimensional CMP stack':'Original velocity model converted to vertical two-way time');
+  const buttons={stack:'finalViewStack',migrated:'finalViewMigrated',model:'finalViewModel'};
+  Object.entries(buttons).forEach(([view,id])=>{
+    const button=document.getElementById(id),on=finalView===view;
+    button.classList.toggle('on',on);button.setAttribute('aria-pressed',String(on));
+  });
+  const titles={
+    stack:'CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span>',
+    migrated:'MIGRATED SECTION — POST-STACK KIRCHHOFF <span class="view-badge">DISPLAY GAIN ONLY</span>',
+    model:'ORIGINAL MODEL — VERTICAL TIME REFERENCE <span class="view-badge">NOT MIGRATED</span>'
+  };
+  const labels={
+    stack:'Unmigrated two-dimensional CMP stack',
+    migrated:'Post-stack Kirchhoff time-migrated section',
+    model:'Original velocity model converted to vertical two-way time'
+  };
+  document.getElementById('finalTitle').innerHTML=titles[finalView];
+  document.getElementById('finalSection').setAttribute('aria-label',labels[finalView]);
 }
 
 function stopFinalFlip(uncheck=true){
@@ -2043,14 +2528,19 @@ function stopFinalFlip(uncheck=true){
 
 function setFinalComparisonView(view,fromFlip=false){
   if(!fromFlip)stopFinalFlip(true);
-  finalView=view==='model'?'model':'stack';updateFinalViewControls();drawFinalSection();
+  finalView=view==='model'?'model':view==='migrated'?'migrated':'stack';
+  if(finalView!=='model')finalDataView=finalView;
+  updateFinalViewControls();drawFinalSection();
 }
 
 function setFinalFlip(enabled){
   stopFinalFlip(false);
   if(!enabled)return;
-  finalView='stack';updateFinalViewControls();drawFinalSection();
-  finalFlipTimer=setInterval(()=>setFinalComparisonView(finalView==='stack'?'model':'stack',true),950);
+  // Alternate whichever data view is selected against the model reference, so
+  // the flip compares like with like rather than always showing the raw stack.
+  if(finalDataView==='migrated'&&!migratedStacks.size)finalDataView='stack';
+  finalView=finalDataView;updateFinalViewControls();drawFinalSection();
+  finalFlipTimer=setInterval(()=>setFinalComparisonView(finalView==='model'?finalDataView:'model',true),950);
 }
 
 function potentialSurveyCmpRange(){
@@ -2068,15 +2558,16 @@ function drawFinalSection(){
   const W=cv.width,H=cv.height,L=48,R=12,T=28,B=28,pw=W-L-R,ph=H-T-B;
   updateFinalViewControls();ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);fc.fillStyle='#0b0e12';fc.fillRect(0,0,foldCv.width,foldCv.height);
   const cmpKeys=[...cmpBins.keys()].sort((a,b)=>a-b),range=finalRange||(finalView==='model'?(cmpKeys.length?{min:cmpKeys[0],max:cmpKeys.at(-1)}:potentialSurveyCmpRange()):null);
-  if(!range){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(finalView==='stack'?'NMO + Stack All CMPs to build the final unmigrated section.':'Build CMP gathers to establish the model-comparison midpoint range.',L,T+20);return;}
-  const {min,max}=range,count=max-min+1,stacks=[...finalStacks.values()],profile=finalDisplayProfile(stacks);
+  if(!range){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(finalView==='model'?'Build CMP gathers to establish the model-comparison midpoint range.':'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);return;}
+  const activeStacks=finalView==='migrated'?migratedStacks:finalStacks;
+  const {min,max}=range,count=max-min+1,stacks=[...activeStacks.values()],profile=finalDisplayProfile(stacks);
   if(finalView==='model'){
     drawFinalModelReference(ctx,L,T,pw,ph,min,max);
     document.getElementById('finalDisplayInfo').textContent=`Vertical-time model reference at the acquisition datum, including the ${(sourceWaveletDelay()*1000).toFixed(0)} ms causal source-wavelet delay. It is a comparison reference—not a migrated image.`;
   }else if(stacks.length){
     if(!finalImg||finalImg.width!==pw||finalImg.height!==ph)finalImg=ctx.createImageData(pw,ph);const d=finalImg.data;
     for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){
-      const index=min+Math.min(count-1,Math.floor(x/pw*count)),item=finalStacks.get(index);let g=8;
+      const index=min+Math.min(count-1,Math.floor(x/pw*count)),item=activeStacks.get(index);let g=8;
       if(item){const a=Math.min(item.stack.nt-1,Math.floor(y/ph*item.stack.nt)),v=Math.max(-1,Math.min(1,profile.valueAt(item.stack.samples[a],a,item.stack.nt)/profile.clip*profile.gain));g=Math.round(v>=0?118+v*137:118+v*110);}
       const o=(y*pw+x)*4;d[o]=d[o+1]=d[o+2]=g;d[o+3]=255;
     }
@@ -2085,9 +2576,10 @@ function drawFinalSection(){
       stacks.forEach(item=>{const col=item.index-min,x0=L+(col+.5)/count*pw,tr=item.stack.samples;ctx.strokeStyle='#8edbff';ctx.lineWidth=.9;ctx.beginPath();for(let a=0;a<tr.length;a++){const normalized=Math.max(-1,Math.min(1,profile.valueAt(tr[a],a,tr.length)/profile.clip*profile.gain)),x=x0+normalized*(pw/count)*.43,y=T+a/(tr.length-1)*ph;a?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();});
     }
     const gainName=profile.mode==='sqrt'?'√t':profile.mode==='linear'?'t':'no time';
-    document.getElementById('finalDisplayInfo').textContent=`Display only: robust P98.5 clip · ${gainName} compensation · ${profile.gain.toFixed(1)}× gain. Processed stack samples are unchanged.`;
+    document.getElementById('finalDisplayInfo').textContent=`${finalView==='migrated'?`Migrated section · aperture ${migrationAperture} m. `:''}Display only: robust P98.5 clip · ${gainName} compensation · ${profile.gain.toFixed(1)}× gain. Processed samples are unchanged.`;
   }else{
-    ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText('NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);
+    ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';
+    ctx.fillText(finalView==='migrated'?'Run "Migrate stack" after stacking to build the migrated section.':'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);
   }
   ctx.strokeStyle='rgba(35,42,51,.75)';ctx.fillStyle='#a0abb6';ctx.font='10px ui-sans-serif';
   for(let s=0;s<=tmax+1e-6;s+=.2){const y=T+s/tmax*ph;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();ctx.fillText(s.toFixed(1)+' s',3,y+3);}
@@ -2097,7 +2589,7 @@ function drawFinalSection(){
   fc.fillStyle='#8a949f';fc.font='10px ui-sans-serif';fc.fillText(`Fold 0–${maxFold}`,3,10);fc.fillText(`${(cmpOrigin+min*cmpBinSize).toFixed(0)} m`,fL,foldCv.height-7);fc.fillText(right,foldCv.width-fR-fc.measureText(right).width,foldCv.height-7);
 }
 
-document.getElementById('finalSection').addEventListener('click',e=>{if(finalView!=='stack'||!finalRange)return;const cv=e.currentTarget,b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*cv.width/b.width,L=48,R=12,count=finalRange.max-finalRange.min+1,index=finalRange.min+Math.floor((x-L)/(cv.width-L-R)*count);if(cmpBins.has(index))selectCmp(index,'nmo');});
+document.getElementById('finalSection').addEventListener('click',e=>{if(finalView==='model'||!finalRange)return;const cv=e.currentTarget,b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*cv.width/b.width,L=48,R=12,count=finalRange.max-finalRange.min+1,index=finalRange.min+Math.floor((x-L)/(cv.width-L-R)*count);if(cmpBins.has(index))selectCmp(index,'nmo');});
 
 function updateFlow(){
   const states={flowShots:shotRecords.length?'done':'active',flowReceiver:shotRecords.length?'done':'',flowCmp:cmpBins.size?'done':'',flowVel:(picks.length||velocitySource==='model')?'done':'',flowNmo:selectedCmpIndex!==null?'active':'',flowStack:finalStacks.size?'done':''};
@@ -2317,8 +2809,44 @@ function setStage(stage){
   if(stage==='cmp')drawCmpViews();if(stage==='nmo'){ensureSemblance();drawNmo();}if(stage==='final')drawFinalSection();render();
 }
 document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>setStage(b.dataset.stage));
-document.getElementById('tabCommonShot').onclick=()=>{document.getElementById('commonShotView').style.display='';document.getElementById('commonReceiverView').style.display='none';document.getElementById('tabCommonShot').classList.add('on');document.getElementById('tabCommonReceiver').classList.remove('on');};
-document.getElementById('tabCommonReceiver').onclick=()=>{document.getElementById('commonShotView').style.display='none';document.getElementById('commonReceiverView').style.display='';document.getElementById('tabCommonShot').classList.remove('on');document.getElementById('tabCommonReceiver').classList.add('on');drawAcquisitionViews();};
+function setAcquisitionSubtab(which){
+  const views={shot:'commonShotView',receiver:'commonReceiverView',spectrum:'spectrumView'};
+  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',spectrum:'tabSpectrum'};
+  Object.entries(views).forEach(([key,id])=>{document.getElementById(id).style.display=key===which?'':'none';});
+  Object.entries(tabs).forEach(([key,id])=>{document.getElementById(id).classList.toggle('on',key===which);});
+  if(which==='receiver')drawAcquisitionViews();
+  if(which==='spectrum')drawSpectrum();
+}
+document.getElementById('tabCommonShot').onclick=()=>setAcquisitionSubtab('shot');
+document.getElementById('tabCommonReceiver').onclick=()=>setAcquisitionSubtab('receiver');
+document.getElementById('tabSpectrum').onclick=()=>setAcquisitionSubtab('spectrum');
+
+function readFilterCorners(){
+  return [1,2,3,4].map(n=>+document.getElementById('fc'+n).value);
+}
+function applyFilterCorners(){
+  const corners=readFilterCorners();
+  if(!validFilterCorners(corners)){
+    document.getElementById('spectrumInfo').textContent='Corner frequencies must increase: f1 < f2 < f3 < f4.';
+    return false;
+  }
+  filterCorners=corners;
+  if(filterEnabled)rebuildFilteredDatabase(`Bandpass ${corners.join('-')} Hz applied`);
+  else drawSpectrum();
+  return true;
+}
+document.getElementById('applyFilter').onclick=applyFilterCorners;
+document.getElementById('filterOn').onchange=e=>{
+  const corners=readFilterCorners();
+  if(e.target.checked&&!validFilterCorners(corners)){
+    e.target.checked=false;
+    document.getElementById('spectrumInfo').textContent='Corner frequencies must increase: f1 < f2 < f3 < f4.';
+    return;
+  }
+  filterCorners=corners;filterEnabled=e.target.checked;
+  rebuildFilteredDatabase(filterEnabled?`Bandpass ${corners.join('-')} Hz applied`:'Bandpass removed');
+};
+document.getElementById('spectrumSource').onchange=drawSpectrum;
 document.getElementById('shotAxis').onchange=()=>{drawAcquisitionViews();refreshShotGallery();};
 document.getElementById('receiverAxis').onchange=drawAcquisitionViews;
 document.getElementById('receiverSelect').onchange=e=>{selectedReceiverId=+e.target.value;drawAcquisitionViews();};
@@ -2362,7 +2890,9 @@ document.getElementById('processAll').onclick=processAllCMPs;document.getElement
 document.getElementById('finalGain').oninput=e=>{document.getElementById('finalGainLbl').textContent=(+e.target.value).toFixed(1)+'×';drawFinalSection();};
 document.getElementById('finalTimeGain').onchange=drawFinalSection;
 document.getElementById('finalViewStack').onclick=()=>setFinalComparisonView('stack');
+document.getElementById('finalViewMigrated').onclick=()=>setFinalComparisonView('migrated');
 document.getElementById('finalViewModel').onclick=()=>setFinalComparisonView('model');
+document.getElementById('migrateBtn').onclick=runMigration;
 document.getElementById('finalFlip').onchange=e=>setFinalFlip(e.target.checked);
 
 /* Auto-pick: select the strongest semblance peak in time bands, then merge
@@ -2382,6 +2912,10 @@ document.getElementById('nmoDensity').onchange=e=>{nmoDensity=e.target.checked;d
 document.getElementById('exactMoveout').onchange=e=>{showExactMoveout=e.target.checked;drawNmo();};
 document.querySelectorAll('input[name="velocitySource"]').forEach(r=>r.onchange=e=>{velocitySource=e.target.value;drawNmo();updateFlow();});
 document.getElementById('stretchMute').onchange=e=>{stretchLimit=e.target.value==='off'?null:+e.target.value;drawNmo();};
+function topMuteChanged(){sembDirty=true;finalStacks.clear();finalRange=null;drawNmo();drawCmpViews();drawFinalSection();}
+document.getElementById('topMuteOn').onchange=e=>{topMuteEnabled=e.target.checked;topMuteChanged();};
+document.getElementById('muteT0').oninput=e=>{topMuteT0=+e.target.value;document.getElementById('muteT0Lbl').textContent=topMuteT0.toFixed(2)+' s';if(topMuteEnabled)topMuteChanged();};
+document.getElementById('muteVel').oninput=e=>{topMuteVelocity=+e.target.value;document.getElementById('muteVelLbl').textContent=topMuteVelocity+' m/s';if(topMuteEnabled)topMuteChanged();};
 document.getElementById('vAuto').onclick=()=>{
   if(selectedCmpIndex===null){document.getElementById('nmoInfo').textContent='Select a CMP first.';return;}
   velocitySource='model';document.querySelector('input[name="velocitySource"][value="model"]').checked=true;const center=cmpOrigin+selectedCmpIndex*cmpBinSize,points=modelRmsFunctionAt(center),dipping=modelHasLateralVariation();
@@ -2407,11 +2941,11 @@ function runNumericalChecks(){
   results.push({test:'precomputed FD stencil matches original update',pass:Math.abs(fdOriginal-fdFast)<1e-6*Math.max(1,Math.abs(fdOriginal))});
   const testDt=.002,testNt=700,trueT0=.45,trueV=2200,offsets=[-600,-300,0,300,600];
   const synthetic=offsets.map((sourceReceiverOffset,k)=>{const samples=new Float32Array(testNt),arrival=moveoutTime(trueT0,sourceReceiverOffset,trueV,0);for(let a=0;a<testNt;a++){const q=(a*testDt-arrival)/.006;samples[a]=Math.exp(-q*q);}return{shotId:k+1,receiverId:k+1,sourceX:0,receiverX:sourceReceiverOffset,midpointX:0,sourceReceiverOffset,halfOffset:sourceReceiverOffset/2,samples,dt:testDt,nt:testNt};});
-  const corrected=applyNMO(synthetic,()=>trueV,null,0),peakIndices=corrected.correctedRecords.map(r=>{let bi=0;for(let a=1;a<r.nt;a++)if(r.samples[a]>r.samples[bi])bi=a;return bi;}),target=Math.round(trueT0/testDt),flatError=Math.max(...peakIndices.map(i=>Math.abs(i-target)));results.push({test:'zero-delay synthetic hyperbola flattens after NMO',pass:flatError<=2});
+  const corrected=applyNMO(synthetic,()=>trueV,null,0,null),peakIndices=corrected.correctedRecords.map(r=>{let bi=0;for(let a=1;a<r.nt;a++)if(r.samples[a]>r.samples[bi])bi=a;return bi;}),target=Math.round(trueT0/testDt),flatError=Math.max(...peakIndices.map(i=>Math.abs(i-target)));results.push({test:'zero-delay synthetic hyperbola flattens after NMO',pass:flatError<=2});
   const coherence=v=>{let sum=0,sq=0;for(const r of synthetic){const t=moveoutTime(trueT0,r.sourceReceiverOffset,v,0),f=t/testDt,i=Math.floor(f),w=f-i,s=r.samples[i]*(1-w)+r.samples[i+1]*w;sum+=s;sq+=s*s;}return sum*sum/(synthetic.length*sq);};results.push({test:'semblance peak near known velocity',pass:coherence(trueV)>coherence(1700)&&coherence(trueV)>coherence(3000)});
   const stack=stackOf(corrected);let peak=0;for(let a=1;a<stack.nt;a++)if(stack.samples[a]>stack.samples[peak])peak=a;results.push({test:'NMO stack event at known t0',pass:Math.abs(peak-target)<=2&&stack.samples[peak]>.9});
-  const muted=applyNMO([synthetic[synthetic.length-1]],()=>trueV,.3,0);results.push({test:'stretch mute marks shallow far-offset sample invalid',pass:muted.valid[0][Math.round(.1/testDt)]===0});
-  const delayedT0=.45,testDelay=.044,delayed=offsets.map((sourceReceiverOffset,k)=>{const samples=new Float32Array(testNt),arrival=moveoutTime(delayedT0,sourceReceiverOffset,trueV,testDelay);for(let a=0;a<testNt;a++){const q=(a*testDt-arrival)/.006;samples[a]=Math.exp(-q*q);}return{...synthetic[k],samples};}),delayedCorrected=applyNMO(delayed,()=>trueV,null,testDelay),delayedPeaks=delayedCorrected.correctedRecords.map(r=>{let bi=0;for(let a=1;a<r.nt;a++)if(r.samples[a]>r.samples[bi])bi=a;return bi;});
+  const muted=applyNMO([synthetic[synthetic.length-1]],()=>trueV,.3,0,null);results.push({test:'stretch mute marks shallow far-offset sample invalid',pass:muted.valid[0][Math.round(.1/testDt)]===0});
+  const delayedT0=.45,testDelay=.044,delayed=offsets.map((sourceReceiverOffset,k)=>{const samples=new Float32Array(testNt),arrival=moveoutTime(delayedT0,sourceReceiverOffset,trueV,testDelay);for(let a=0;a<testNt;a++){const q=(a*testDt-arrival)/.006;samples[a]=Math.exp(-q*q);}return{...synthetic[k],samples};}),delayedCorrected=applyNMO(delayed,()=>trueV,null,testDelay,null),delayedPeaks=delayedCorrected.correctedRecords.map(r=>{let bi=0;for(let a=1;a<r.nt;a++)if(r.samples[a]>r.samples[bi])bi=a;return bi;});
   results.push({test:'causal-wavelet-delay hyperbola flattens after NMO',pass:Math.max(...delayedPeaks.map(i=>Math.abs(i-target)))<=2});
   const centerX=MX*DX/2,firstModelPoint=modelRmsFunctionAt(centerX)[1],modelI=Math.round(centerX/DX),expectedFirst=sourceWaveletDelay()+2*(modelInterfaceDepth(1,modelI)-SURF*DX)/layers[0].vp;
   results.push({test:'model RMS uses acquisition datum and wavelet delay',pass:Math.abs(firstModelPoint.t0-expectedFirst)<1e-9&&Math.abs(firstModelPoint.v-layers[0].vp)<1e-9});

@@ -198,9 +198,18 @@
     </div>
 
     <div class="grp">
+      <p class="ttl">Session</p>
+      <div class="row"><button id="sessionSave">Save</button><button id="sessionRestore">Restore</button></div>
+      <div class="row"><button id="sessionExport">Export JSON</button><button id="sessionImport">Import JSON</button></div>
+      <input type="file" id="sessionFile" accept="application/json,.json" style="display:none">
+      <div class="hint" id="sessionInfo">Saves the model, survey and processing settings — not the acquired traces.</div>
+    </div>
+
+    <div class="grp">
       <p class="ttl">Status</p>
       <div class="hint" id="stat">idle</div>
       <div class="hint" id="solverPath">Solver: main thread</div>
+      <div class="hint" id="selfTest">Self-tests: pending</div>
       <div class="progress" role="progressbar" aria-label="Acquisition progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="acqProgress"></div></div>
     </div>
   </div>
@@ -1876,7 +1885,6 @@ function drawDixPanel(){
       ctx.moveTo(x,yOf(t));ctx.lineTo(x,yOf(t+segment.intervalT));t+=segment.intervalT;
     });
     ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle='#ffc857';ctx.fillText('true model interval',L+4,T+12);
   }
 
   if(!points.length){
@@ -1890,7 +1898,6 @@ function drawDixPanel(){
   points.forEach((point,k)=>{const x=xOf(point.v),y=yOf(point.t0);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});
   ctx.stroke();
   points.forEach(point=>{ctx.fillStyle='#7dff9b';ctx.beginPath();ctx.arc(xOf(point.v),yOf(point.t0),3.5,0,7);ctx.fill();});
-  ctx.fillStyle='#7dff9b';ctx.fillText('picked RMS',L+4,T+26);
 
   // Dix intervals as a step function, unstable ones flagged in red
   intervals.forEach(entry=>{
@@ -1904,7 +1911,15 @@ function drawDixPanel(){
       ctx.fillStyle='#ff6b6b';ctx.fillText('unstable: '+entry.reason,L+6,(yTop+yBase)/2-3);
     }
   });
-  ctx.fillStyle='#ff9d4d';ctx.fillText('Dix interval',L+4,T+40);
+  // One legend, drawn last over a backdrop so it stays readable wherever the
+  // velocity curves happen to run.
+  const legend=[['#ffc857','true model interval'],['#7dff9b','picked RMS'],['#ff9d4d','Dix interval']];
+  const legendWidth=Math.max(...legend.map(entry=>ctx.measureText(entry[1]).width))+18;
+  ctx.fillStyle='rgba(7,12,18,.82)';ctx.fillRect(L+4,T+4,legendWidth,legend.length*14+8);
+  legend.forEach((entry,k)=>{
+    ctx.fillStyle=entry[0];ctx.fillRect(L+9,T+12+k*14,8,2);
+    ctx.fillText(entry[1],L+21,T+16+k*14);
+  });
 
   const stable=intervals.filter(entry=>entry.stable);
   const summary=stable.map(entry=>`${entry.top.toFixed(2)}–${entry.base.toFixed(2)} s → ${entry.interval.toFixed(0)} m/s`).join(' · ');
@@ -2591,6 +2606,190 @@ function drawFinalSection(){
 
 document.getElementById('finalSection').addEventListener('click',e=>{if(finalView==='model'||!finalRange)return;const cv=e.currentTarget,b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*cv.width/b.width,L=48,R=12,count=finalRange.max-finalRange.min+1,index=finalRange.min+Math.floor((x-L)/(cv.width-L-R)*count);if(cmpBins.has(index))selectCmp(index,'nmo');});
 
+/* ---------------- session save / load ---------------- */
+/* Only the SETUP is persisted -- the model, the survey and every processing
+   setting -- never the acquired samples. A full survey is several megabytes of
+   Float32, which would not fit in localStorage and would make an exported file
+   unwieldy; re-running acquisition from a restored setup takes seconds and
+   reproduces the data exactly. */
+const SESSION_KEY='waveSandbox.session.v1';
+
+function collectSessionState(){
+  return {
+    version:1,
+    layers:layers.map(layer=>({vp:layer.vp,rho:layer.rho,knees:layer.knees.map(knee=>({x:knee.x,z:knee.z}))})),
+    receivers:recs.map(r=>({id:r.id,i:r.i})),
+    shots:shotPositions.map(shot=>({id:shot.id,i:shot.i})),
+    nextShotId,selectedShotId,
+    acquisition:{mode:acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide,
+      topBoundary,f0,tmax,simulationSpeed},
+    processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),velocitySource,vnmo,stretchLimit,
+      topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
+      migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value},
+    display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
+  };
+}
+
+/* Imported JSON is arbitrary text from a file, so every field is clamped and
+   type-checked rather than trusted; anything missing falls back to what is
+   already loaded. */
+function clampNumber(value,fallback,lo,hi){const n=+value;return Number.isFinite(n)?Math.max(lo,Math.min(hi,n)):fallback;}
+function pickFrom(value,allowed,fallback){return allowed.includes(value)?value:fallback;}
+
+function sanitiseLayers(raw){
+  if(!Array.isArray(raw)||!raw.length)return null;
+  const out=raw.slice(0,7).map(layer=>{
+    const knees=Array.isArray(layer&&layer.knees)?layer.knees
+      .filter(knee=>knee&&Number.isFinite(+knee.x)&&Number.isFinite(+knee.z))
+      .map(knee=>({x:clampNumber(knee.x,0,0,1),z:clampNumber(knee.z,0,0,1)}))
+      .sort((a,b)=>a.x-b.x):[];
+    return {
+      vp:clampNumber(layer&&layer.vp,1600,300,9000),
+      rho:clampNumber(layer&&layer.rho,2000,500,6000),
+      knees:knees.length>=2?knees:kneesFromDepths([0,0,0,0,0])
+    };
+  });
+  out[0].knees=kneesFromDepths([0,0,0,0,0]);   // the surface is always flat at z = 0
+  return out;
+}
+
+function applySessionState(state){
+  if(!state||typeof state!=='object')throw new Error('not a session object');
+  const layerSet=sanitiseLayers(state.layers);
+  if(!layerSet)throw new Error('no usable layers');
+  layers=layerSet;
+
+  const maxI=MX-1;
+  if(Array.isArray(state.receivers)&&state.receivers.length)
+    recs=state.receivers.filter(r=>Number.isFinite(+r.i)).map((r,n)=>({id:Number.isFinite(+r.id)?+r.id:n+1,i:clampNumber(r.i,0,0,maxI),j:SURF})).sort((a,b)=>a.i-b.i);
+  if(Array.isArray(state.shots)&&state.shots.length)
+    shotPositions=state.shots.filter(shot=>Number.isFinite(+shot.i)).map((shot,n)=>({id:Number.isFinite(+shot.id)?+shot.id:n+1,i:clampNumber(shot.i,0,0,maxI),j:SURF})).sort((a,b)=>a.i-b.i);
+  nextShotId=Math.max(1,clampNumber(state.nextShotId,shotPositions.length+1,1,1e6));
+  selectedShotId=shotPositions.some(shot=>shot.id===state.selectedShotId)?state.selectedShotId:(shotPositions[0]?.id??null);
+
+  const acq=state.acquisition||{};
+  acquisitionMode=pickFrom(acq.mode,['fixed','streamer'],acquisitionMode);
+  streamerChannels=clampNumber(acq.streamerChannels,streamerChannels,2,240);
+  streamerSpacing=clampNumber(acq.streamerSpacing,streamerSpacing,DX,500);
+  streamerNearOffset=clampNumber(acq.streamerNearOffset,streamerNearOffset,0,2000);
+  streamerSide=pickFrom(acq.streamerSide,['trailing','leading','split'],streamerSide);
+  topBoundary=pickFrom(acq.topBoundary,['free','absorbing'],topBoundary);
+  f0=clampNumber(acq.f0,f0,8,60);
+  tmax=clampNumber(acq.tmax,tmax,.4,3);
+  simulationSpeed=clampNumber(acq.simulationSpeed,simulationSpeed,1,16);
+
+  const proc=state.processing||{};
+  cmpBinSize=clampNumber(proc.cmpBinSize,cmpBinSize,5,500);
+  picks=Array.isArray(proc.picks)?proc.picks.filter(pick=>Number.isFinite(+pick.t0)&&Number.isFinite(+pick.v))
+    .map(pick=>({t0:clampNumber(pick.t0,0,0,tmax),v:clampNumber(pick.v,2000,200,12000)})).sort((a,b)=>a.t0-b.t0):[];
+  velocitySource=pickFrom(proc.velocitySource,['constant','manual','model'],velocitySource);
+  vnmo=clampNumber(proc.vnmo,vnmo,1200,6000);
+  stretchLimit=proc.stretchLimit===null?null:clampNumber(proc.stretchLimit,stretchLimit,0,4);
+  topMuteEnabled=!!proc.topMuteEnabled;
+  topMuteT0=clampNumber(proc.topMuteT0,topMuteT0,0,.5);
+  topMuteVelocity=clampNumber(proc.topMuteVelocity,topMuteVelocity,600,6000);
+  const corners=Array.isArray(proc.filterCorners)?proc.filterCorners.map(Number):null;
+  if(corners&&validFilterCorners(corners))filterCorners=corners;
+  filterEnabled=!!proc.filterEnabled&&validFilterCorners(filterCorners);
+  migrationAperture=clampNumber(proc.migrationAperture,migrationAperture,50,5000);
+
+  const disp=state.display||{};
+  nmoDisplayGain=clampNumber(disp.nmoDisplayGain,nmoDisplayGain,.5,8);
+  nmoDensity=disp.nmoDensity!==false;
+  showExactMoveout=disp.showExactMoveout!==false;
+  wavefieldBoost=!!disp.wavefieldBoost;
+
+  syncControlsFromState(proc);
+  clearAcquisitionRecords();
+  refreshLayerUI();refreshAcquisitionModeUI();refreshReceiverControls();refreshPickList();
+  setup();drawCmpViews();drawFinalSection();updateFlow();render();
+  return true;
+}
+
+function syncControlsFromState(proc){
+  const set=(id,value)=>{const el=document.getElementById(id);if(el)el.value=value;};
+  const check=(id,value)=>{const el=document.getElementById(id);if(el)el.checked=!!value;};
+  set('cmpBinSize',cmpBinSize);set('freq',f0);set('tmax',tmax);set('simSpeed',simulationSpeed);
+  set('topBoundary',topBoundary);set('acqMode',acquisitionMode);
+  set('stCh',streamerChannels);set('stDx',streamerSpacing);set('stNear',streamerNearOffset);set('stSide',streamerSide);
+  set('vnmo',vnmo);set('nmoGain',nmoDisplayGain);set('migAperture',migrationAperture);
+  set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);
+  set('stretchMute',stretchLimit===null?'off':String(stretchLimit));
+  [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
+  if(proc&&proc.minFold)set('minFold',proc.minFold);
+  if(proc&&proc.allVelocity)set('allVelocity',proc.allVelocity);
+  check('topMuteOn',topMuteEnabled);check('filterOn',filterEnabled);
+  check('nmoDensity',nmoDensity);check('exactMoveout',showExactMoveout);check('showRays',wavefieldBoost);
+  const radio=document.querySelector(`input[name="velocitySource"][value="${velocitySource}"]`);
+  if(radio)radio.checked=true;
+  document.getElementById('fLbl').textContent=f0+' Hz';
+  document.getElementById('tLbl').textContent=tmax.toFixed(2)+' s';
+  document.getElementById('vLbl').textContent=vnmo+' m/s';
+  document.getElementById('nmoGainLbl').textContent=nmoDisplayGain.toFixed(1)+'×';
+  document.getElementById('muteT0Lbl').textContent=topMuteT0.toFixed(2)+' s';
+  document.getElementById('muteVelLbl').textContent=topMuteVelocity+' m/s';
+}
+
+function sessionMessage(text,warn=false){
+  const el=document.getElementById('sessionInfo');
+  el.textContent=text;el.style.color=warn?'#ffb35c':'';
+}
+
+function saveSessionToStorage(){
+  try{
+    localStorage.setItem(SESSION_KEY,JSON.stringify(collectSessionState()));
+    sessionMessage(`Saved at ${new Date().toLocaleTimeString()}. Setup only — re-run acquisition after restoring.`);
+  }catch(err){
+    sessionMessage('Could not save: browser storage is unavailable or full.',true);
+  }
+}
+
+function restoreSessionFromStorage(){
+  let raw=null;
+  try{raw=localStorage.getItem(SESSION_KEY);}catch(err){sessionMessage('Browser storage is unavailable here.',true);return;}
+  if(!raw){sessionMessage('No saved session found.',true);return;}
+  try{
+    applySessionState(JSON.parse(raw));
+    sessionMessage('Session restored. Run acquisition to regenerate the traces.');
+  }catch(err){
+    sessionMessage('Saved session could not be read: '+err.message,true);
+  }
+}
+
+function exportSessionFile(){
+  try{
+    const blob=new Blob([JSON.stringify(collectSessionState(),null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download='wave-sandbox-session.json';
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    sessionMessage('Exported wave-sandbox-session.json.');
+  }catch(err){
+    sessionMessage('Export failed: '+err.message,true);
+  }
+}
+
+function importSessionFile(file){
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      applySessionState(JSON.parse(String(reader.result)));
+      sessionMessage(`Imported ${file.name}. Run acquisition to regenerate the traces.`);
+    }catch(err){
+      sessionMessage('Import failed: '+err.message,true);
+    }
+  };
+  reader.onerror=()=>sessionMessage('Import failed: could not read the file.',true);
+  reader.readAsText(file);
+}
+
+function noteSavedSession(){
+  try{
+    if(localStorage.getItem(SESSION_KEY))sessionMessage('A saved session is available — press Restore to load it.');
+  }catch(err){/* storage blocked; the buttons will report it when used */}
+}
+
 function updateFlow(){
   const states={flowShots:shotRecords.length?'done':'active',flowReceiver:shotRecords.length?'done':'',flowCmp:cmpBins.size?'done':'',flowVel:(picks.length||velocitySource==='model')?'done':'',flowNmo:selectedCmpIndex!==null?'active':'',flowStack:finalStacks.size?'done':''};
   Object.entries(states).forEach(([id,c])=>{document.getElementById(id).className=c;});
@@ -2655,7 +2854,11 @@ function surveyChangeAllowed(message='Geometry changed'){
 }
 
 function clearAcquisitionRecords(){
-  running=false;paused=false;shotRecords=[];acquisitionTraces=[];cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;finalStacks.clear();finalRange=null;semb=null;sembDirty=true;
+  running=false;paused=false;shotRecords=[];acquisitionTraces=[];cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;
+  // Every derived product goes with the records, migration included -- leaving
+  // it behind would show a migrated section belonging to data that is gone.
+  finalStacks.clear();migratedStacks.clear();finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
+  semb=null;sembDirty=true;cvsCache=null;
   activeShotId=null;setup();document.getElementById('pauseAcq').textContent='Pause';document.getElementById('acqProgress').style.width='0%';
   document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; run an acquisition to measure achieved speed. Solver dt and recorded traces are unchanged.`;
   refreshShotGallery();refreshReceiverControls();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();
@@ -2760,6 +2963,11 @@ function applySourceCountPreset(count){
 }
 document.querySelectorAll('[data-source-count]').forEach(button=>button.onclick=()=>applySourceCountPreset(+button.dataset.sourceCount));
 document.getElementById('showRays').onchange=e=>{wavefieldBoost=e.target.checked;render();};
+document.getElementById('sessionSave').onclick=saveSessionToStorage;
+document.getElementById('sessionRestore').onclick=restoreSessionFromStorage;
+document.getElementById('sessionExport').onclick=exportSessionFile;
+document.getElementById('sessionImport').onclick=()=>document.getElementById('sessionFile').click();
+document.getElementById('sessionFile').onchange=e=>{importSessionFile(e.target.files&&e.target.files[0]);e.target.value='';};
 
 function describeStreamer(){
   const perSide=streamerChannelsPerSide(),far=streamerNearOffset+(perSide-1)*streamerSpacing;
@@ -2952,11 +3160,114 @@ function runNumericalChecks(){
   results.push({test:'time-model reference uses seismic peak convention',pass:Math.abs(modelTimeBoundariesAt(centerX)[1]-firstModelPoint.t0)<1e-9});
   const exactFirst=sourceWaveletDelay()+exactLayeredTime(modelVerticalSegmentsAt(centerX,1),600),hyperbolicFirst=moveoutTime(firstModelPoint.t0,600,firstModelPoint.v);
   results.push({test:'exact layered curve matches first-layer hyperbola',pass:Math.abs(exactFirst-hyperbolicFirst)<1e-8});
+  // --- top boundary -------------------------------------------------------
+  // The pressure field is all zeros at start-up, so it can be borrowed for a
+  // three-cell check and zeroed again without disturbing anything.
+  const boundaryColumn=OX+10,belowColumn=boundaryColumn+NX,savedBoundary=topBoundary;
+  p1[boundaryColumn]=.3;p1[belowColumn]=.7;p2[belowColumn]=.9;p2[boundaryColumn]=123;
+  topBoundary='free';applyTopBoundary(p2,p1);const freeValue=p2[boundaryColumn];
+  p2[boundaryColumn]=123;topBoundary='absorbing';applyTopBoundary(p2,p1);
+  const murK=(vp[boundaryColumn]*dt-DX)/(vp[boundaryColumn]*dt+DX),absorbingValue=p2[boundaryColumn];
+  const expectedMur=p1[belowColumn]+murK*(p2[belowColumn]-p1[boundaryColumn]);
+  topBoundary=savedBoundary;p1.fill(0);p2.fill(0);
+  // expectedMur is computed in double precision but stored into a Float32Array,
+  // so compare at float32 resolution as the FD stencil check above does.
+  results.push({test:'free surface pins p=0, absorbing top applies Mur',
+    pass:freeValue===0&&absorbingValue!==0&&Math.abs(absorbingValue-expectedMur)<1e-6*Math.max(1,Math.abs(expectedMur))});
+
+  // --- FFT and bandpass ---------------------------------------------------
+  const fftN=256,fftRe=new Float64Array(fftN),fftIm=new Float64Array(fftN),fftRef=new Float64Array(fftN);
+  for(let i=0;i<fftN;i++){fftRef[i]=Math.sin(i*.3)+.5*Math.cos(i*.07);fftRe[i]=fftRef[i];}
+  fftRadix2(fftRe,fftIm,false);fftRadix2(fftRe,fftIm,true);
+  let fftError=0;for(let i=0;i<fftN;i++)fftError=Math.max(fftError,Math.abs(fftRe[i]-fftRef[i]));
+  results.push({test:'FFT forward/inverse round-trip',pass:fftError<1e-9});
+
+  const bpDt=.002,bpN=512,bpCorners=[5,10,45,60];
+  const sineAt=frequency=>{const a=new Float32Array(bpN);for(let i=0;i<bpN;i++)a[i]=Math.sin(2*Math.PI*frequency*i*bpDt);return a;};
+  const interiorRms=a=>{let sum=0,n=0;for(let i=100;i<a.length-100;i++){sum+=a[i]*a[i];n++;}return Math.sqrt(sum/Math.max(1,n));};
+  const inBandRatio=interiorRms(bandpassFilter(sineAt(20),bpDt,bpCorners))/interiorRms(sineAt(20));
+  const outBandRatio=interiorRms(bandpassFilter(sineAt(120),bpDt,bpCorners))/interiorRms(sineAt(120));
+  results.push({test:'bandpass passes in-band and rejects out-of-band',pass:inBandRatio>.9&&outBandRatio<.05});
+
+  const spikeN=512,spike=new Float32Array(spikeN),spikeCentre=256;
+  for(let i=0;i<spikeN;i++){const q=(i-spikeCentre)/6;spike[i]=Math.exp(-q*q);}
+  const filteredSpike=bandpassFilter(spike,bpDt,[2,6,60,90]);
+  let spikePeak=0;for(let i=1;i<spikeN;i++)if(filteredSpike[i]>filteredSpike[spikePeak])spikePeak=i;
+  results.push({test:'bandpass is zero phase (peak does not move)',pass:Math.abs(spikePeak-spikeCentre)<=1});
+
+  // --- top mute -----------------------------------------------------------
+  // Offset 600 m, mute 0.1 s + |x| / 2000 = 0.4 s of INPUT time. The output
+  // sample at t0 = 0 reads input 0.27 s and must go; t0 = 0.5 s reads 0.57 s
+  // and must stay.
+  const muteResult=applyNMO([synthetic[4]],()=>trueV,null,0,{t0:.1,velocity:2000});
+  results.push({test:'top mute drops input times earlier than t0 + |x|/v',
+    pass:muteResult.valid[0][0]===0&&muteResult.valid[0][Math.round(.5/testDt)]===1});
+
+  // --- Dix inversion ------------------------------------------------------
+  const dixV2=Math.sqrt((2000*2000*.4+3000*3000*.3)/.7),dixGood=dixIntervals([{t0:.4,v:2000},{t0:.7,v:dixV2}],0);
+  results.push({test:'Dix recovers a known interval velocity',
+    pass:dixGood.length===1&&dixGood[0].stable&&Math.abs(dixGood[0].interval-3000)<1e-6});
+  const dixBad=dixIntervals([{t0:.4,v:3000},{t0:.7,v:1500}],0);
+  results.push({test:'Dix reports an unstable inversion instead of a wrong number',
+    pass:dixBad.length===1&&!dixBad[0].stable&&dixBad[0].interval===null});
+
+  // --- post-stack migration ----------------------------------------------
+  // A section holding nothing but one diffraction hyperbola must collapse to
+  // its apex: the apex amplitude survives, the flank empties out.
+  const migBin=25,migNt=400,migDt=.002,migV=2500,migApex=10,migApexT0=.4,migDelay=sourceWaveletDelay();
+  const migStacks=new Map();
+  for(let k=0;k<=20;k++){
+    const samples=new Float32Array(migNt),arrival=moveoutTime(migApexT0,2*(k-migApex)*migBin,migV,migDelay);
+    for(let a=0;a<migNt;a++){const q=(a*migDt-arrival)/.008;samples[a]=Math.exp(-q*q);}
+    migStacks.set(k,{index:k,center:k*migBin,fold:10,stack:{samples,nt:migNt,dt:migDt}});
+  }
+  const peakOfColumn=(map,index)=>{const tr=map.get(index).stack.samples;let best=0;
+    for(let a=1;a<tr.length;a++)if(Math.abs(tr[a])>Math.abs(tr[best]))best=a;return{index:best,value:tr[best]};};
+  const flankBefore=peakOfColumn(migStacks,migApex+7).value;
+  const migrated=migrateSection(migStacks,{min:0,max:20},migBin,()=>migV,600,migDelay);
+  const apexAfter=peakOfColumn(migrated,migApex),flankAfter=peakOfColumn(migrated,migApex+7).value;
+  results.push({test:'migration collapses a diffraction to its apex',
+    pass:Math.abs(apexAfter.index*migDt-migApexT0)<=2*migDt&&apexAfter.value>.7&&Math.abs(flankAfter)<.25*Math.abs(flankBefore)});
+
+  // --- streamer geometry --------------------------------------------------
+  const savedGeometry=[acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide];
+  acquisitionMode='streamer';streamerChannels=6;streamerSpacing=50;streamerNearOffset=100;streamerSide='trailing';
+  const centreShot={id:1,i:Math.round(MX/2),j:SURF},centreLayout=streamerReceiversFor(centreShot);
+  const centreOffsets=centreLayout.map(r=>(r.i-centreShot.i)*DX).sort((a,b)=>a-b);
+  const edgeShot={id:2,i:Math.round(120/DX),j:SURF},edgeLayout=streamerReceiversFor(edgeShot);
+  const nominalOffset=id=>-(streamerNearOffset+(id-1)*streamerSpacing);
+  const edgeConsistent=edgeLayout.every(r=>Math.abs((r.i-edgeShot.i)*DX-nominalOffset(r.id))<=DX/2+1e-9);
+  [acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide]=savedGeometry;
+  syncActiveReceivers();
+  results.push({test:'streamer offsets stay fixed relative to the shot',
+    pass:centreOffsets.length===6&&Math.abs(centreOffsets[0]+350)<1e-9&&Math.abs(centreOffsets[5]+100)<1e-9});
+  results.push({test:'off-model streamer channels drop without renumbering',
+    pass:edgeLayout.length>0&&edgeLayout.length<6&&edgeConsistent});
+
+  // --- session round-trip -------------------------------------------------
+  const sessionBefore=JSON.stringify(collectSessionState());
+  let sessionRoundTrip=false;
+  try{applySessionState(JSON.parse(sessionBefore));sessionRoundTrip=JSON.stringify(collectSessionState())===sessionBefore;}
+  catch(err){sessionRoundTrip=false;}
+  results.push({test:'session state survives a save/load round-trip',pass:sessionRoundTrip});
+  results.push({test:'malformed session import is rejected, not applied',
+    pass:(()=>{try{applySessionState({layers:'not-an-array'});return false;}catch(err){return true;}})()});
+
+  const failures=results.filter(r=>!r.pass);
+  lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};
+  const badge=document.getElementById('selfTest');
+  if(badge){
+    badge.textContent=`Self-tests: ${lastSelfTest.passed}/${lastSelfTest.total} passed`+(failures.length?` — ${failures.map(r=>r.test).join('; ')}`:'');
+    badge.style.color=failures.length?'var(--bad)':'var(--good)';
+  }
   console.group('CMP sandbox numerical checks');console.table(results);results.forEach(r=>console.assert(r.pass,r.test));console.groupEnd();
 }
 
+let lastSelfTest=null;
+function selfTestSummary(){return lastSelfTest;}
+
 /* init */
-ensureSolverWorker();updateSolverPathReadout();
+ensureSolverWorker();updateSolverPathReadout();noteSavedSession();
 refreshLayerUI();updateModelPresetInfo();refreshAcquisitionModeUI();refreshReceiverControls();setup();buildCmpBins(false);refreshShotGallery();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();render();runNumericalChecks();frame();
 </script>
 </body>

@@ -1,0 +1,2109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>2D Wave Propagation &amp; CMP Processing Sandbox</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#2a313b; --txt:#d5dae1; --dim:#8a949f;
+    --acc:#4da3ff; --gold:#ffc857; --warn:#ffb35c; --good:#68d391; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;
+         align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
+  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
+  .hint{color:var(--dim);font-size:12px}
+  #wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:12px;padding:12px;align-items:start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .ttl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);
+       margin:0 0 8px}
+  canvas{display:block;border-radius:4px;background:#000;cursor:crosshair}
+  #ctrl{width:230px;display:flex;flex-direction:column;gap:14px;position:sticky;top:58px}
+  .grp{display:flex;flex-direction:column;gap:6px}
+  label{font-size:12px;color:var(--dim);display:flex;justify-content:space-between}
+  input[type=range]{width:100%;accent-color:var(--acc)}
+  button{background:#20262f;color:var(--txt);border:1px solid var(--line);
+         border-radius:5px;padding:6px 9px;font:inherit;cursor:pointer}
+  button:hover{background:#2a323d}
+  button.on{background:var(--acc);color:#06121f;border-color:var(--acc);font-weight:600}
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  .row>button{flex:1}
+  .swatch{width:14px;height:14px;border-radius:3px;display:inline-block;
+          vertical-align:-2px;margin-right:6px;border:1px solid #0006}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td{padding:2px 3px}
+  td:first-child{color:var(--dim)}
+  input[type=number]{width:100%;background:#0e1116;color:var(--txt);
+    border:1px solid var(--line);border-radius:4px;padding:3px 5px;font:inherit}
+  .tabs{display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+  .tab{border:none;border-bottom:2px solid transparent;border-radius:0;
+       background:none;padding:5px 12px;color:var(--dim)}
+  .tab:hover{background:none;color:var(--txt)}
+  .tab.on{color:var(--acc);border-bottom-color:var(--acc);background:none;font-weight:600}
+  .dual{display:flex;gap:10px;align-items:flex-start}
+  .nmoctl{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);
+           max-width:620px}
+  .main-tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+  .stage{display:none;min-width:0}.stage.on{display:block}
+  main{min-width:0}.stage canvas{max-width:100%;height:auto}
+  .stage-grid{display:grid;grid-template-columns:minmax(620px,1.15fr) minmax(660px,1fr);gap:12px;align-items:start}
+  .model-panel,.active-gather-panel{min-width:0}
+  .model-panel #model{width:100%;height:auto}
+  .model-edit-wrap{position:relative;width:100%}
+  .model-context{display:none;position:absolute;z-index:8;min-width:145px;padding:5px;background:#0e1116;border:1px solid #44505f;border-radius:6px;box-shadow:0 8px 24px #0009}
+  .model-context.on{display:block}.model-context button{width:100%;text-align:left;background:#161b22}
+  .preset-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+  .preset-grid button:last-child:nth-child(odd){grid-column:1/-1}
+  .knee-count{font-size:10px;color:var(--gold);white-space:nowrap}
+  #layerList tr.layer-row{cursor:pointer;border-left:3px solid transparent;transition:background .12s,border-color .12s}
+  #layerList tr.layer-row:hover{background:rgba(77,163,255,.07)}
+  #layerList tr.layer-row.selected{background:rgba(255,200,87,.11);border-left-color:var(--gold)}
+  #layerList tr.layer-row.selected td:first-child{color:var(--gold);font-weight:600}
+  button:disabled{cursor:not-allowed;opacity:.45}
+  .active-gather-panel .dual{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .active-gather-panel .dual>div{min-width:0}
+  .active-gather-panel canvas{width:100%;height:auto}
+  .selected-gather{width:min(100%,1100px);height:auto}
+  .subtabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .toolbar label{display:flex;gap:6px;align-items:center;justify-content:flex-start}
+  .toolbar .compact-range{width:120px}
+  .view-switch{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .view-switch button{border:0;border-right:1px solid var(--line);border-radius:0}
+  .view-switch button:last-child{border-right:0}
+  .view-badge{display:inline-block;padding:2px 7px;border-radius:999px;background:#202832;color:var(--gold);font-size:11px;letter-spacing:.05em}
+  select{background:#0e1116;color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:5px;font:inherit}
+  .wide{width:100%}.scroll-row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px}
+  .shot-card{min-width:190px;padding:7px;background:#11161d;border:1px solid var(--line);border-radius:6px;cursor:pointer}
+  .shot-card.on{border-color:var(--acc)}.shot-card h3{font-size:12px;margin:0 0 4px;font-weight:600}
+  .shot-card canvas{width:174px;height:150px}.shot-card .hint{display:flex;justify-content:space-between}
+  .canvas-wrap{position:relative;display:inline-block;max-width:100%}.canvas-wrap canvas{max-width:100%;height:auto}
+  .flow{display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--dim)}
+  .flow span{padding:3px 7px;border-bottom:2px solid var(--line)}.flow span.done{color:var(--good)}.flow span.active{color:var(--acc);border-color:var(--acc)}
+  .metric{color:var(--txt)}.warning{color:var(--warn)}.gold{color:var(--gold)}
+  .note{padding:8px 10px;background:#11161d;border-left:3px solid var(--acc);margin:8px 0;color:var(--dim)}
+  details{margin-top:8px;color:var(--dim)}summary{cursor:pointer;color:var(--txt)}
+  .cmp-layout{display:grid;grid-template-columns:minmax(420px,1.2fr) minmax(280px,.8fr);gap:12px;align-items:start}
+  .scheme-legend{display:flex;gap:14px;flex-wrap:wrap;margin:7px 0;color:var(--dim);font-size:12px}
+  .scheme-legend span{display:flex;align-items:center;gap:5px}.legend-mark{display:inline-block;width:12px;height:12px}
+  .legend-source{color:#ff6b6b}.legend-receiver{color:#7fd3ff}.legend-midpoint{background:var(--gold);border-radius:50%}.legend-bin{background:rgba(255,200,87,.24);border:1px solid var(--gold)}
+  .nmo-cmp-selector{margin:8px 0 12px;padding:9px;background:#11161d;border:1px solid #202832;border-radius:6px}
+  .nmo-cmp-selector-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .nmo-cmp-selector-head .ttl{margin:0}.nmo-cmp-selector canvas{width:100%;height:auto;cursor:pointer}.nmo-cmp-selector canvas:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .nmo-cmp-legend{display:flex;gap:15px;align-items:center;flex-wrap:wrap;margin-top:5px;color:var(--dim);font-size:11px}
+  .nmo-cmp-legend span{display:flex;align-items:center;gap:5px}.nmo-cmp-legend i{display:inline-block;width:12px;height:9px;border-radius:2px;background:var(--acc)}
+  .nmo-cmp-legend .selected{background:var(--gold)}
+  .nmo-grid{display:grid;grid-template-columns:minmax(250px,.85fr) minmax(360px,1.35fr) minmax(360px,1.35fr) minmax(180px,.55fr);gap:12px;align-items:start;width:100%}
+  .nmo-pane{min-width:0}.nmo-pane canvas{width:100%;height:auto;image-rendering:auto}.nmo-pane .hint{margin-top:4px}
+  .nmo-pane{padding:4px;background:#11161d;border:1px solid #202832;border-radius:5px}
+  .nmo-pane .ttl{margin:0 0 7px 2px}
+  .progress{height:6px;background:#252c35;border-radius:4px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--acc)}
+  .empty{padding:24px;text-align:center;color:var(--dim);border:1px dashed var(--line);border-radius:6px}
+  @media(max-width:1450px){.stage-grid{grid-template-columns:1fr}}
+  @media(max-width:1450px){.nmo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:1050px){#wrap{grid-template-columns:1fr}#ctrl{position:static;width:auto}.cmp-layout{grid-template-columns:1fr}.main-tabs{margin-left:0}}
+  @media(max-width:650px){.nmo-grid{grid-template-columns:1fr}.dual{flex-wrap:wrap}.panel{overflow-x:auto}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>2D Wave Propagation &amp; CMP Processing Sandbox</h1>
+  <span class="hint" id="modeHint">Mode: Layer knees — drag a handle to reshape; right-click a boundary to add a knee</span>
+  <nav class="main-tabs" aria-label="Processing stages">
+    <button class="tab on" data-stage="acquisition">Acquisition</button>
+    <button class="tab" data-stage="cmp">CMP / CDP Sort</button>
+    <button class="tab" data-stage="nmo">NMO / Stack</button>
+    <button class="tab" data-stage="final">Final Section</button>
+  </nav>
+</header>
+
+<div id="wrap">
+
+  <div id="ctrl" class="panel">
+    <div class="grp">
+      <p class="ttl">Tool</p>
+      <div class="row">
+        <button id="tLayer" class="on">Layer</button>
+        <button id="tSrc">Add Shot</button>
+        <button id="tRec">Receiver</button>
+      </div>
+    </div>
+
+    <div class="grp" id="layerBox">
+      <p class="ttl">Model presets</p>
+      <select id="modelPreset" aria-label="Geological model preset">
+        <option value="flat">Flat layers</option><option value="anticline">Anticline</option><option value="syncline">Syncline</option><option value="wedge">Wedge</option><option value="channel">Channel</option><option value="reef">Carbonate reef</option>
+      </select>
+      <button id="applyModelPreset">Apply geological preset</button>
+      <div class="hint" id="modelPresetInfo">All interfaces start with five draggable knees. Right-click a boundary to add another.</div>
+      <p class="ttl">Layers (top → bottom)</p>
+      <div id="layerList"></div>
+      <div class="row"><button id="addLayer">+ Layer</button><button id="delLayer">Remove selected layer</button></div>
+      <div class="hint" id="layerActionHint">Select a layer row to edit or remove it.</div>
+    </div>
+
+    <div class="grp">
+      <p class="ttl">Survey geometry</p>
+      <table>
+        <tr><td>Receivers</td><td><input type="number" id="pgN" value="40" min="1" max="120" step="1"></td></tr>
+        <tr><td>Spacing (m)</td><td><input type="number" id="pgDx" value="20" min="5" step="5"></td></tr>
+        <tr><td>First x (m)</td><td><input type="number" id="pgOff" value="260" min="0" step="5"></td></tr>
+      </table>
+      <div class="row"><button id="pgApply">Apply receivers</button><button id="surveyPreset">Teaching survey</button></div>
+      <div class="hint" style="margin-top:5px">Source presets — automatically wider than the receiver spread</div>
+      <div class="preset-grid" id="sourcePresets"><button data-source-count="3">3 shots</button><button data-source-count="5">5 shots</button><button data-source-count="10">10 shots</button><button data-source-count="20">20 shots</button><button data-source-count="25">25 shots</button></div>
+      <div class="hint" id="pgInfo">Default: 28 shots at 40 m spacing, 40 central receivers at 20 m.</div>
+    </div>
+
+    <div class="grp">
+      <p class="ttl">Wavelet / record</p>
+      <label>Peak freq <span id="fLbl">25 Hz</span></label>
+      <input type="range" id="freq" min="8" max="60" value="25" step="1">
+      <label>Record length <span id="tLbl">1.20 s</span></label>
+      <input type="range" id="tmax" min="0.4" max="3" value="1.2" step="0.1">
+    </div>
+
+    <div class="grp">
+      <p class="ttl">Acquisition</p>
+      <label>Propagation target <select id="simSpeed"><option value="1">1× target</option><option value="2">2× target</option><option value="4">4× target</option><option value="8">8× target</option><option value="16" selected>16× / max CPU</option></select></label>
+      <div class="hint" id="speedPerf">Target rate; live displays are repainted less often at high speed. FD dt and recorded physics are unchanged.</div>
+      <div class="row"><button id="shoot" class="on">Run acquisition</button><button id="pauseAcq">Pause</button></div>
+      <div class="row"><button id="rerunShot">Re-run shot</button><button id="cancelAcq">Cancel</button></div>
+      <div class="row"><button id="clearShots">Clear shots</button><button id="clearAcq">Clear records</button></div>
+      <div class="row"><button id="clearGeom">Clear receivers</button></div>
+      <label style="justify-content:flex-start;gap:6px">
+        <input type="checkbox" id="showRays" style="accent-color:var(--acc)"> overlay wavefield gain
+      </label>
+    </div>
+
+    <div class="grp">
+      <p class="ttl">Status</p>
+      <div class="hint" id="stat">idle</div>
+      <div class="progress" role="progressbar" aria-label="Acquisition progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="acqProgress"></div></div>
+    </div>
+  </div>
+
+  <main>
+    <div class="flow panel" aria-label="Teaching workflow">
+      <span id="flowShots" class="active">Shots →</span><span id="flowReceiver">Receiver sorting →</span><span id="flowCmp">CMP / CDP sorting →</span><span id="flowVel">Velocity analysis →</span><span id="flowNmo">NMO →</span><span id="flowStack">Stack</span>
+    </div>
+
+    <section id="stageAcquisition" class="stage on">
+      <div class="stage-grid">
+        <div class="panel model-panel">
+          <p class="ttl">Velocity model, wavefield &amp; surface geometry</p>
+          <div class="model-edit-wrap" id="modelEditWrap"><canvas id="model" width="900" height="460" aria-label="Editable velocity model and active wavefield"></canvas><div id="modelContext" class="model-context" role="menu"><button id="addKneeMenu" role="menuitem">Add knee here</button></div></div>
+          <div class="hint" id="activeShotInfo">Add two or more shots on the surface, then run acquisition.</div>
+        </div>
+        <div class="panel active-gather-panel">
+          <p class="ttl">Active common-shot gather</p>
+          <div class="dual">
+        <div>
+          <p class="ttl">Wiggle</p>
+          <canvas id="gather" width="400" height="460"></canvas>
+        </div>
+        <div>
+          <p class="ttl">Variable density</p>
+          <canvas id="gray" width="400" height="460"></canvas>
+        </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel wide" style="margin-top:12px">
+        <div class="subtabs">
+          <button id="tabCommonShot" class="tab on">Common Shot</button>
+          <button id="tabCommonReceiver" class="tab">Common Receiver</button>
+        </div>
+        <div id="commonShotView">
+          <p class="ttl">Common shot gathers</p>
+          <div id="shotGallery" class="scroll-row"><div class="empty wide">Completed shots appear here without being erased by later shots.</div></div>
+          <div class="toolbar"><label>Axis <select id="shotAxis"><option value="offset">Signed offset</option><option value="receiver">Receiver position</option></select></label></div>
+          <canvas id="acqGather" class="selected-gather" width="1100" height="660" aria-label="Selected common shot gather"></canvas>
+        </div>
+        <div id="commonReceiverView" style="display:none">
+          <div class="toolbar"><label>Receiver <select id="receiverSelect"></select></label><label>Axis <select id="receiverAxis"><option value="offset">Signed offset</option><option value="shot">Shot position</option></select></label></div>
+          <div class="hint" id="receiverInfo">Acquire shots to build a common receiver gather.</div>
+          <canvas id="receiverGather" class="selected-gather" width="1100" height="660" aria-label="Common receiver gather"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section id="stageCmp" class="stage">
+      <div class="panel">
+        <div class="toolbar">
+          <label>CMP bin size <input type="number" id="cmpBinSize" value="25" min="5" step="5" style="width:80px"> m</label>
+          <button id="buildCmp" class="on">Build CMP gathers</button>
+          <button id="prevCmp">← Previous</button><button id="nextCmp">Next →</button>
+        </div>
+        <canvas id="foldCanvas" width="1040" height="150" aria-label="CMP fold by midpoint"></canvas>
+        <div class="hint" id="cmpInfo">Acquire at least one shot, then build CMP gathers.</div>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <p class="ttl">Survey scheme — how traces enter the selected CMP / CDP bin</p>
+        <div class="scheme-legend" aria-label="Survey geometry legend">
+          <span class="legend-source"><i class="legend-mark">★</i> source station</span>
+          <span class="legend-receiver"><i class="legend-mark">▼</i> receiver station</span>
+          <span><i class="legend-mark legend-midpoint"></i> trace midpoint</span>
+          <span><i class="legend-mark legend-bin"></i> selected midpoint bin</span>
+        </div>
+        <div class="hint" id="surveySummary">The default survey uses a wider source line around a denser central receiver patch.</div>
+        <canvas id="geometryStrip" width="1040" height="380" aria-label="Readable source midpoint receiver construction for the selected CMP"></canvas>
+      </div>
+      <div class="cmp-layout" style="margin-top:12px">
+        <div class="panel">
+          <p class="ttl">Selected CMP / CDP gather — signed offset</p>
+          <canvas id="cmpGather" width="620" height="430" aria-label="Selected CMP gather"></canvas>
+          <div class="note">A CMP gather contains traces whose source-receiver midpoints fall in the same midpoint bin. Their offsets differ, so the same reflection appears at different arrival times because of normal moveout.</div>
+        </div>
+        <div class="panel">
+          <p class="ttl">Selected trace calculation</p>
+          <div id="lineage" class="note">Click any acquisition trace to inspect its source, receiver, offset, midpoint, and CMP bin.</div>
+          <div class="hint">The horizontal connectors above are acquisition geometry, not subsurface raypaths.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="stageNmo" class="stage">
+      <div class="panel">
+        <div class="toolbar"><button id="prevCmpNmo">← CMP</button><strong id="nmoCmpTitle">No CMP selected</strong><button id="nextCmpNmo">CMP →</button></div>
+        <div class="nmo-cmp-selector">
+          <div class="nmo-cmp-selector-head"><p class="ttl">CMP gather selector — midpoint and fold</p><span class="hint" id="nmoCmpSelectorSummary">Build CMP gathers to populate this scheme.</span></div>
+          <canvas id="nmoCmpScheme" width="1800" height="190" tabindex="0" aria-label="Selectable CMP gathers by midpoint and fold"></canvas>
+          <div class="nmo-cmp-legend"><span><i></i> available CMP; height = fold</span><span><i class="selected"></i> selected CMP</span><span>Click a bar to load that gather into every NMO display.</span></div>
+        </div>
+        <div class="nmo-grid">
+          <div class="nmo-pane"><p class="ttl">Semblance</p><canvas id="sembC" width="520" height="920"></canvas><div class="hint">velocity → · t₀ ↓</div></div>
+          <div class="nmo-pane"><p class="ttl">Raw CMP</p><canvas id="nmoRaw" width="720" height="920"></canvas><div class="hint">wiggle + variable density</div></div>
+          <div class="nmo-pane"><p class="ttl">NMO corrected CMP</p><canvas id="nmoCor" width="720" height="920"></canvas><div class="hint">amber = muted / invalid</div></div>
+          <div class="nmo-pane"><p class="ttl">Stack</p><canvas id="nmoStk" width="340" height="920"></canvas><div class="hint">live-fold mean</div></div>
+        </div>
+        <div class="note" id="hyperbolaInfo">Red = active NMO hyperbola. Gold = exact layered-model reference.</div>
+        <div class="nmoctl wide">
+          <div class="hint">Click semblance to add a (t₀, v) pick; shift-click near a pick to delete it. Click the raw CMP to move the predicted hyperbola.</div>
+          <div class="toolbar">
+            <label><input type="radio" name="velocitySource" value="constant"> Constant velocity</label>
+            <label><input type="radio" name="velocitySource" value="manual" checked> Manual picked v(t)</label>
+            <label><input type="radio" name="velocitySource" value="model"> Model-derived RMS v(t)</label>
+          </div>
+          <label>Constant velocity <span id="vLbl">2000 m/s</span></label>
+          <input type="range" id="vnmo" min="1200" max="6000" value="2000" step="25">
+          <label>Seismic display gain <span id="nmoGainLbl">2.5×</span></label>
+          <input type="range" id="nmoGain" min="0.5" max="8" value="2.5" step="0.5">
+          <div class="toolbar">
+            <button id="vAuto">Show Model RMS</button><button id="vAutoPick">Auto-pick peaks</button><button id="vClear">Clear picks</button>
+            <label>Stretch mute <select id="stretchMute"><option value="off">OFF</option><option value="0.3">30%</option><option value="0.5" selected>50%</option><option value="0.75">75%</option><option value="1">100%</option></select></label>
+            <label><input type="checkbox" id="nmoDensity" checked> variable-density backdrop</label>
+            <label><input type="checkbox" id="exactMoveout" checked> exact layered-model curve</label>
+          </div>
+          <div class="hint" id="nmoInfo">Bright spots mark coherent reflections.</div><div class="hint" id="pickList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="stageFinal" class="stage">
+      <div class="panel">
+        <div class="toolbar">
+          <label>All-CMP velocity <select id="allVelocity"><option value="model">Model RMS at each CMP</option><option value="shared">Apply reference CMP velocity to all CMPs</option></select></label>
+          <label>Minimum fold <select id="minFold"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+          <button id="processAll" class="on">NMO + Stack All CMPs</button>
+          <label><input type="checkbox" id="finalWiggle" checked> Wiggle overlay</label>
+          <label>Display gain <input class="compact-range" type="range" id="finalGain" min="0.5" max="4" step="0.1" value="1.6"><span id="finalGainLbl" class="metric">1.6×</span></label>
+          <label>Time gain <select id="finalTimeGain"><option value="none">None</option><option value="sqrt" selected>√t compensation</option><option value="linear">t compensation</option></select></label>
+          <span class="view-switch" role="group" aria-label="Final section comparison view"><button id="finalViewStack" class="on" aria-pressed="true">Stack</button><button id="finalViewModel" aria-pressed="false">Model TWT</button></span>
+          <label><input type="checkbox" id="finalFlip"> Flip-flop</label>
+        </div>
+        <p class="ttl" id="finalTitle">CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span></p>
+        <canvas id="finalSection" width="1040" height="520" aria-label="Unmigrated two-dimensional CMP stack"></canvas>
+        <div class="hint" id="finalDisplayInfo">Robust 98.5% clipping and √t compensation reveal later reflections without changing the processed stack samples.</div>
+        <p class="ttl" style="margin-top:8px">Fold</p>
+        <canvas id="finalFold" width="1040" height="110" aria-label="Fold aligned to final CMP stack"></canvas>
+        <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
+        <div class="note">Use <b>Stack</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare the unmigrated stack with the original model converted to vertical two-way time. Flat reflectors should approximately align. Dipping events generally will not: their common reflection/depth point is not the surface midpoint, so DMO/migration is required for proper positioning.</div>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO; no elastic modes, statics, DMO, migration, residual moveout, anisotropy correction, deconvolution, or sophisticated preprocessing. The output is an NMO CMP stack, not a fully processed seismic image.</p><p class="warning">Dipping reflection: CMP stacking alone does not fully correct dip. DMO/migration would be required.</p></details>
+      </div>
+    </section>
+  </main>
+
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- grid ---------------- */
+// The displayed model is MX x MZ. The simulation grid adds a PAD-cell halo on
+// the left, right and bottom which holds the sponge, so the absorbing region
+// lives entirely OUTSIDE the region the user sees and draws in.
+const MX = 260, MZ = 200;           // displayed model
+const PAD = 90;                     // absorbing halo thickness (tuned)
+const NX = MX + 2*PAD, NZ = MZ + PAD;
+const OX = PAD, OZ = 0;             // offset of model origin within sim grid
+const DX = 5;                       // m
+const CW = 900, CH = 460;           // wider model canvas for the acquisition overview
+const SX = CW/MX, SZ = CH/MZ;       // px per model cell
+
+const mCan = document.getElementById('model'), mc = mCan.getContext('2d');
+const gCan = document.getElementById('gather'), gc = gCan.getContext('2d');
+
+/* ---------------- model ---------------- */
+const DEFAULT_KNEE_X=[0,.25,.5,.75,1],MIN_LAYER_GAP=.012;
+function kneesFromDepths(depths){const count=Math.max(2,depths.length);return Array.from({length:count},(_,n)=>({x:n/(count-1),z:depths[Math.min(n,depths.length-1)]}));}
+function modelLayer(vp,rho,depths){return{vp,rho,knees:kneesFromDepths(depths)};}
+function smoothFoldDepths(edgeDepth,centreDepth,count=13){
+  return Array.from({length:count},(_,n)=>{const x=n/(count-1),distance=Math.abs(2*x-1),smooth=.5-.5*Math.cos(Math.PI*distance);return centreDepth+(edgeDepth-centreDepth)*smooth;});
+}
+
+// Each layer owns its top boundary. Subsurface boundaries are piecewise-linear
+// curves with five control knees by default; the surface remains fixed at z=0.
+let layers = [
+  modelLayer(1600,1900,[0,0,0,0,0]),
+  modelLayer(2400,2200,[.28,.28,.28,.28,.28]),
+  modelLayer(3200,2450,[.52,.52,.52,.52,.52]),
+  modelLayer(4500,2700,[.76,.76,.76,.76,.76])
+];
+const PAL = ['#2f4858','#33697d','#3f9098','#7fb8a4','#c9d6a3','#e0b97d','#c98b6b'];
+
+const MODEL_PRESETS={
+  flat:()=>[
+    modelLayer(1600,1900,[0,0,0,0,0]),modelLayer(2400,2200,[.28,.28,.28,.28,.28]),modelLayer(3200,2450,[.52,.52,.52,.52,.52]),modelLayer(4500,2700,[.76,.76,.76,.76,.76])],
+  anticline:()=>[
+    modelLayer(1700,1950,[0,0,0,0,0]),modelLayer(2450,2200,smoothFoldDepths(.36,.12)),modelLayer(3300,2475,smoothFoldDepths(.63,.36)),modelLayer(4550,2725,smoothFoldDepths(.87,.61))],
+  syncline:()=>[
+    modelLayer(1700,1950,[0,0,0,0,0]),modelLayer(2450,2200,smoothFoldDepths(.16,.46)),modelLayer(3300,2475,smoothFoldDepths(.42,.73)),modelLayer(4550,2725,smoothFoldDepths(.68,.92))],
+  wedge:()=>[
+    modelLayer(1650,1925,[0,0,0,0,0]),modelLayer(2300,2150,[.26,.26,.26,.26,.26]),modelLayer(3000,2380,[.278,.35,.45,.55,.64]),modelLayer(4400,2680,[.76,.76,.77,.79,.84])],
+  channel:()=>[
+    modelLayer(1750,1975,[0,0,0,0,0]),modelLayer(2100,2100,[.25,.25,.25,.25,.25]),modelLayer(3100,2425,[.27,.31,.43,.31,.27]),modelLayer(4500,2700,[.67,.67,.70,.67,.67])],
+  reef:()=>[
+    modelLayer(1850,2025,[0,0,0,0,0]),modelLayer(4200,2625,[.35,.30,.22,.30,.35]),modelLayer(3000,2400,[.368,.41,.49,.41,.368]),modelLayer(4700,2750,[.72,.72,.74,.72,.72])]
+};
+
+let vp  = new Float32Array(NX*NZ);
+let rho = new Float32Array(NX*NZ);
+
+function interpolateKnees(knees,x){
+  if(!knees||!knees.length)return 1;
+  x=Math.max(0,Math.min(1,x));let n=0;
+  while(n+1<knees.length&&x>knees[n+1].x)n++;
+  const a=knees[n],b=knees[Math.min(knees.length-1,n+1)],w=(x-a.x)/Math.max(1e-9,b.x-a.x);
+  return a.z+(b.z-a.z)*Math.max(0,Math.min(1,w));
+}
+
+// Depth (fraction of model height) of interface k at model column i.
+function ifaceZ(k,i){const L=layers[k];return L?interpolateKnees(L.knees,i/Math.max(1,MX-1)):1;}
+function interfaceIsVariable(k){
+  const knees=layers[k]?.knees||[];if(knees.length<2)return false;
+  return Math.max(...knees.map(p=>p.z))-Math.min(...knees.map(p=>p.z))>.003;
+}
+function modelHasLateralVariation(){return layers.slice(1).some((_,n)=>interfaceIsVariable(n+1));}
+
+function buildModel(){
+  // Laterally varying now, so every column is evaluated independently. Columns
+  // in the halo are clamped to the model edge column, which continues each
+  // dipping interface at constant depth into the sponge -- the interface must
+  // not keep dipping there or it would strike the absorbing wall at an angle.
+  for(let i=0;i<NX;i++){
+    const mi = Math.max(0, Math.min(MX-1, i-OX));   // nearest model column
+    for(let j=0;j<NZ;j++){
+      const zf = Math.min(0.999, (j-OZ)/MZ);
+      let li = 0;
+      for(let k=0;k<layers.length;k++) if(zf >= ifaceZ(k, mi)) li = k;
+      vp[j*NX+i]  = layers[li].vp;
+      rho[j*NX+i] = layers[li].rho;
+    }
+  }
+}
+
+/* ---------------- geometry ---------------- */
+// i,j are MODEL coordinates (0..MX, 0..MZ); simIdx converts to the padded grid.
+// Acquisition is surface-only: every source and receiver sits on row SURF.
+// Kept a couple of cells below the free surface (where p is pinned to 0) so
+// the recorded pressure is non-zero.
+const SURF = 3;
+let src = {i: Math.floor(MX/2), j: SURF}; // active FD source only
+const DEFAULT_RECEIVER_COUNT=40,DEFAULT_RECEIVER_FIRST_X=260,DEFAULT_RECEIVER_SPACING=20;
+const DEFAULT_SHOT_FIRST_X=100,DEFAULT_SHOT_SPACING=40,DEFAULT_SHOT_COUNT=28;
+const DEFAULT_SHOT_X=Array.from({length:DEFAULT_SHOT_COUNT},(_,n)=>DEFAULT_SHOT_FIRST_X+n*DEFAULT_SHOT_SPACING);
+let recs = Array.from({length:DEFAULT_RECEIVER_COUNT},(_,n)=>({id:n+1,i:Math.round((DEFAULT_RECEIVER_FIRST_X+n*DEFAULT_RECEIVER_SPACING)/DX),j:SURF}));
+let shotPositions = DEFAULT_SHOT_X.map((x,n)=>({id:n+1,i:Math.round(x/DX),j:SURF}));
+let nextShotId = DEFAULT_SHOT_X.length+1;
+let selectedShotId = 1;
+
+// Persistent survey products. The active `src` and `traces` below are only FD
+// buffers; completed samples live once in shotRecords and are referenced by the
+// flat acquisitionTraces database for every gather sort.
+let shotRecords = [];
+let acquisitionTraces = [];
+let cmpBins = new Map();
+let cmpBinSize = 25;
+let cmpOrigin = 0;
+let selectedCmpIndex = null;
+let selectedReceiverId = 1;
+let selectedTraceKey = null;
+let finalStacks = new Map();
+let finalRange = null;
+let finalView = 'stack';
+let finalFlipTimer = null;
+
+function simIdx(i,j){ return (j+OZ)*NX + (i+OX); }
+
+/* ---------------- fd state ---------------- */
+let p0,p1,p2, running=false, it=0, nt=0, dt=0, traces=null, tmax=1.2, f0=25;
+let maxAmp=1e-9;
+let acquisitionQueue=[], queueIndex=0, paused=false, cancelRequested=false;
+let activeShotId=null, rerunOnly=false;
+let simulationSpeed=16;
+let perfStart=0,perfSteps=0,lastStatusPaint=0,lastWavefieldPaint=0,lastGatherPaint=0;
+let solverTimer=null,solverClock=0,solverCredit=0;
+const solverChannel=new MessageChannel();
+let nmoDisplayGain=2.5,nmoDensity=true,showExactMoveout=true;
+
+function allocate(){
+  p0=new Float32Array(NX*NZ); p1=new Float32Array(NX*NZ); p2=new Float32Array(NX*NZ);
+}
+
+/* Absorbing boundary.
+   The sponge is a trade-off, not a "more is better" knob: too weak and waves
+   reach the wall and bounce; too strong and the absorption gradient is itself
+   an impedance contrast that scatters. A parameter sweep put the minimum at
+   NB=90, A_MAX=0.1, quadratic ramp -> spurious energy ~1e-4 of peak.
+   The coefficient is folded into the leapfrog update rather than applied as a
+   post-hoc multiply, so the p0/p1 history stays self-consistent. */
+const NB = PAD;
+const A_MAX = 0.1;
+const absorb = new Float32Array(NX*NZ);
+const fdCenter=new Float32Array(NX*NZ),fdPrevious=new Float32Array(NX*NZ);
+const fdXp=new Float32Array(NX*NZ),fdXm=new Float32Array(NX*NZ),fdZp=new Float32Array(NX*NZ),fdZm=new Float32Array(NX*NZ);
+function buildDamp(){
+  for(let j=0;j<NZ;j++) for(let i=0;i<NX;i++){
+    // depth into the sponge, measured from left, right and bottom walls
+    const dl=NB-i, dr=i-(NX-1-NB), db=j-(NZ-1-NB);
+    const m=Math.max(dl,dr,db,0);
+    const x = m>0 ? m/NB : 0;
+    absorb[j*NX+i]=A_MAX*x*x;
+  }
+}
+
+/* Precompute the static variable-density stencil. This is algebraically the
+   same update as div((1/rho) grad p), but removes four density averages, four
+   divisions and the damping division from every cell at every time step. */
+function buildUpdateCoefficients(){
+  const dt2=dt*dt,invDx2=1/(DX*DX);
+  for(let j=1;j<NZ-1;j++){
+    const row=j*NX;
+    for(let i=1;i<NX-1;i++){
+      const k=row+i,rk=rho[k],a=absorb[k],denom=1+a;
+      const scale=dt2*vp[k]*vp[k]*rk*invDx2/denom;
+      const xp=scale/(.5*(rk+rho[k+1])),xm=scale/(.5*(rk+rho[k-1]));
+      const zp=scale/(.5*(rk+rho[k+NX])),zm=scale/(.5*(rk+rho[k-NX]));
+      fdXp[k]=xp;fdXm[k]=xm;fdZp[k]=zp;fdZm[k]=zm;
+      fdCenter[k]=2/denom-xp-xm-zp-zm;
+      fdPrevious[k]=-(1-a)/denom;
+    }
+  }
+}
+
+function ricker(t){
+  const a=Math.PI*f0*(t-1.1/f0);
+  const a2=a*a;
+  return (1-2*a2)*Math.exp(-a2);
+}
+
+function setup(){
+  buildModel(); buildDamp(); allocate();
+  let vmax=0; for(let k=0;k<vp.length;k++) if(vp[k]>vmax) vmax=vp[k];
+  dt = 0.42*DX/vmax;                   // Courant
+  nt = Math.floor(tmax/dt);
+  buildUpdateCoefficients();
+  traces = recs.map(()=> new Float32Array(nt));
+  it=0; maxAmp=1e-9; sembDirty=true;
+}
+
+/* Shots share the same model, damping and FD stencil. Rebuilding those large
+   arrays for every source was a fixed transition cost that dominated the 8x
+   and 16x modes. Only pressure history and receiver traces are shot-specific. */
+function resetShotSimulation(){
+  if(!p0||p0.length!==NX*NZ){setup();return;}
+  p0.fill(0);p1.fill(0);p2.fill(0);
+  traces=recs.map(()=>new Float32Array(nt));
+  it=0;maxAmp=1e-9;sembDirty=true;
+}
+
+function initializeShotSimulation(shot){
+  src={i:shot.i,j:SURF}; activeShotId=shot.id;
+  resetShotSimulation();
+  document.getElementById('activeShotInfo').textContent=
+    `Shot ${queueIndex+1} of ${acquisitionQueue.length} · S${shot.id} · x = ${(shot.i*DX).toFixed(0)} m`;
+}
+
+function traceKey(trace){ return `${trace.shotId}:${trace.receiverId}`; }
+function selectedCmpTraces(){ return selectedCmpIndex===null ? [] : (cmpBins.get(selectedCmpIndex)||[]); }
+function selectedCmpKeys(){ return new Set(selectedCmpTraces().map(traceKey)); }
+
+function finalizeShot(){
+  const shot=shotPositions.find(s=>s.id===activeShotId);
+  if(!shot) return;
+  const record={
+    id:shot.id, sourceX:shot.i*DX, sourceI:shot.i,
+    receivers:recs.map(r=>({id:r.id,i:r.i,j:r.j,x:r.i*DX})),
+    // resetShotSimulation replaces (rather than clears) these trace arrays, so
+    // the completed shot can take ownership without a second full-data copy.
+    traces, dt, nt, maxAmplitude:maxAmp,
+    status:'complete'
+  };
+  const old=shotRecords.findIndex(r=>r.id===record.id);
+  if(old>=0) shotRecords[old]=record; else shotRecords.push(record);
+  shotRecords.sort((a,b)=>a.id-b.id);
+  selectedShotId=record.id;
+  buildTraceDatabase();
+  upsertShotCard(record);
+  updateFlow();
+}
+
+function buildTraceDatabase(){
+  acquisitionTraces=[];
+  shotRecords.forEach(shot=>shot.receivers.forEach((receiver,k)=>{
+    const sourceX=shot.sourceX, receiverX=receiver.x;
+    const sourceReceiverOffset=receiverX-sourceX;
+    const midpointX=(sourceX+receiverX)/2;
+    acquisitionTraces.push({
+      shotId:shot.id, receiverId:receiver.id,
+      sourceI:shot.sourceI, sourceX, receiverI:receiver.i, receiverX,
+      midpointX, sourceReceiverOffset, halfOffset:sourceReceiverOffset/2,
+      samples:shot.traces[k], dt:shot.dt, nt:shot.nt
+    });
+  }));
+}
+
+function cmpIndexForMidpoint(midpointX,binSize=cmpBinSize){
+  return Math.round((midpointX-cmpOrigin)/binSize);
+}
+
+/* Prefer a central, high-fold CMP that actually contains a zero-offset trace.
+   Choosing the first maximum-fold bin can put the visual apex between traces,
+   which makes an otherwise correct moveout curve look displaced. */
+function bestCmpIndex(keys){
+  if(!keys.length)return null;
+  const maxFold=Math.max(...keys.map(k=>cmpBins.get(k).length));
+  const candidates=keys.filter(k=>cmpBins.get(k).length>=Math.max(1,Math.ceil(maxFold*.95)));
+  const shotXs=[...new Set(acquisitionTraces.map(t=>t.sourceX))],receiverXs=[...new Set(acquisitionTraces.map(t=>t.receiverX))];
+  const overlapMin=Math.max(Math.min(...shotXs),Math.min(...receiverXs)),overlapMax=Math.min(Math.max(...shotXs),Math.max(...receiverXs));
+  const target=overlapMin<=overlapMax?(overlapMin+overlapMax)/2:(Math.min(...shotXs,...receiverXs)+Math.max(...shotXs,...receiverXs))/2;
+  const score=k=>{
+    const traces=cmpBins.get(k),offsets=traces.map(t=>t.sourceReceiverOffset),hasZero=offsets.some(x=>Math.abs(x)<1e-6);
+    return {k,hasZero,fold:traces.length,centerDistance:Math.abs(cmpOrigin+k*cmpBinSize-target),symmetry:Math.abs(Math.min(...offsets)+Math.max(...offsets))};
+  };
+  return candidates.map(score).sort((a,b)=>(+b.hasZero)-(+a.hasZero)||b.fold-a.fold||a.centerDistance-b.centerDistance||a.symmetry-b.symmetry||a.k-b.k)[0].k;
+}
+
+function buildCmpBins(selectBest=true){
+  cmpBins=new Map();
+  acquisitionTraces.forEach(trace=>{
+    const index=cmpIndexForMidpoint(trace.midpointX);
+    trace.cmpIndex=index; trace.cmpCenter=cmpOrigin+index*cmpBinSize;
+    if(!cmpBins.has(index)) cmpBins.set(index,[]);
+    cmpBins.get(index).push(trace);
+  });
+  cmpBins.forEach(g=>g.sort((a,b)=>a.sourceReceiverOffset-b.sourceReceiverOffset));
+  const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  if(keys.length && (selectBest || selectedCmpIndex===null || !cmpBins.has(selectedCmpIndex))){
+    selectedCmpIndex=bestCmpIndex(keys);
+  }
+  if(!keys.length) selectedCmpIndex=null;
+  sembDirty=true; finalStacks.clear(); finalRange=null;
+  drawCmpViews(); drawAcquisitionViews(); drawFinalSection();
+}
+
+function step(){
+  const c=fdCenter,q=fdPrevious,xp=fdXp,xm=fdXm,zp=fdZp,zm=fdZm;
+  const previous=p0,current=p1,next=p2,nx=NX;
+  // Boundary coefficients are zero, so a single contiguous loop is equivalent
+  // to the former nested row/column loop and is substantially easier for the
+  // JavaScript engine to optimize.
+  const end=(NZ-1)*nx;
+  for(let k=nx;k<end;k++){
+    next[k]=c[k]*current[k]+q[k]*previous[k]+xp[k]*current[k+1]+xm[k]*current[k-1]+zp[k]*current[k+nx]+zm[k]*current[k-nx];
+  }
+  // Free surface, but ONLY across the model width. Extending p=0 over the
+  // halo would make the top a perfect mirror lying on the sponge, letting
+  // surface-guided energy skim sideways through the padding (parallel to the
+  // damping gradient, so barely attenuated) and return as a fake late event.
+  // Outside the model the top row is left free to be swallowed by the sponge.
+  for(let i=OX;i<OX+MX;i++) p2[i]=0;
+  // source
+  const t=it*dt;
+  p2[simIdx(src.i,src.j)] += ricker(t)*3e4;
+
+  // record
+  for(let n=0;n<recs.length;n++){
+    const r=recs[n], val=p2[simIdx(r.i,r.j)];
+    traces[n][it]=val;
+    const a=Math.abs(val); if(a>maxAmp) maxAmp=a;
+  }
+  const tmp=p0; p0=p1; p1=p2; p2=tmp;
+  it++;
+}
+
+/* ---------------- drawing ---------------- */
+
+const wfImg = mc.createImageData(MX,MZ);
+const wfTmp = document.createElement('canvas'); wfTmp.width=MX; wfTmp.height=MZ;
+const wfCtx = wfTmp.getContext('2d');
+
+function drawModel(){
+  // Fill each band between two editable, piecewise-linear interfaces.
+  for(let k=0;k<layers.length;k++){
+    mc.fillStyle=PAL[k%PAL.length];
+    mc.beginPath();
+    for(let i=0;i<MX;i++){const x=i/(MX-1)*CW,y=Math.max(0,Math.min(1,ifaceZ(k,i)))*CH;i?mc.lineTo(x,y):mc.moveTo(x,y);}
+    if(k+1<layers.length){
+      for(let i=MX-1;i>=0;i--){const x=i/(MX-1)*CW,y=Math.max(0,Math.min(1,ifaceZ(k+1,i)))*CH;mc.lineTo(x,y);}
+    } else {
+      mc.lineTo(CW, CH);
+      mc.lineTo(0,  CH);
+    }
+    mc.closePath(); mc.fill();
+  }
+  // interface lines and labels
+  mc.font='11px ui-sans-serif,sans-serif';
+  for(let k=0;k<layers.length;k++){
+    if(k>0){
+      mc.strokeStyle=tool==='layer'&&k===selectedInterface?'rgba(255,200,87,.95)':'rgba(0,0,0,.68)';mc.lineWidth=tool==='layer'&&k===selectedInterface?2:1;
+      mc.beginPath();for(let i=0;i<MX;i++){const x=i/(MX-1)*CW,y=ifaceZ(k,i)*CH;i?mc.lineTo(x,y):mc.moveTo(x,y);}mc.stroke();
+    }
+    // Put material properties at the base of each layer so the annotation does
+    // not compete with the dense source/receiver station labels at the surface.
+    let labelI=2,maxThickness=-1;for(let i=2;i<MX-2;i+=4){const bottom=k+1<layers.length?ifaceZ(k+1,i):1,thickness=bottom-ifaceZ(k,i);if(thickness>maxThickness){maxThickness=thickness;labelI=i;}}
+    const baseY = k+1<layers.length ? ifaceZ(k+1,labelI)*CH : CH;
+    const ly = Math.max(18, Math.min(CH-6, baseY-8));
+    mc.fillStyle='rgba(255,255,255,.75)';
+    mc.fillText(`${layers[k].vp} m/s · ${layers[k].rho} kg/m³`,Math.max(6,Math.min(CW-190,labelI/(MX-1)*CW-65)),ly);
+  }
+  // wavefield
+  if(p1){
+    const d=wfImg.data;
+    // Keep wavefield brightness independent of receiver placement. A
+    // colocated source/receiver can create a large recorded sample that should
+    // not dim the model-wide wavefield display for interior shots.
+    let wavefieldAmp=1e-9;
+    for(let j=0;j<MZ;j+=2) for(let i=0;i<MX;i+=2) wavefieldAmp=Math.max(wavefieldAmp,Math.abs(p1[(j+OZ)*NX+OX+i]));
+    const scale = 1/wavefieldAmp;
+    for(let j=0;j<MZ;j++){
+      const srow=(j+OZ)*NX+OX, drow=j*MX;
+      for(let i=0;i<MX;i++){
+        const v=Math.max(-1,Math.min(1,p1[srow+i]*scale*2));
+        const a=Math.min(255, Math.abs(v)*520);
+        const o=(drow+i)*4;
+        if(v>0){ d[o]=255; d[o+1]=150; d[o+2]=40; }
+        else   { d[o]=60;  d[o+1]=150; d[o+2]=255; }
+        d[o+3]=a;
+      }
+    }
+    mc.save();
+    mc.imageSmoothingEnabled=false;
+    wfCtx.putImageData(wfImg,0,0);
+    mc.drawImage(wfTmp,0,0,CW,CH);
+    mc.restore();
+  }
+  // surface acquisition band: shows where sources/receivers land regardless
+  // of the click depth
+  if(tool==='src'||tool==='rec'){
+    mc.fillStyle='rgba(77,163,255,.12)';
+    mc.fillRect(0,0,CW,(SURF+2)*SZ+8);
+    mc.strokeStyle='rgba(77,163,255,.5)'; mc.lineWidth=1;
+    mc.beginPath(); mc.moveTo(0,(SURF+2)*SZ+8); mc.lineTo(CW,(SURF+2)*SZ+8); mc.stroke();
+  }
+
+  // Selected CMP lineage is surface geometry only: straight source-receiver
+  // connectors are not subsurface raypaths.
+  const cmpKeys=selectedCmpKeys();
+  selectedCmpTraces().forEach(trace=>{
+    mc.strokeStyle='rgba(255,200,87,.32)'; mc.lineWidth=1;
+    mc.beginPath(); mc.moveTo(trace.sourceI*SX,19); mc.lineTo(trace.receiverI*SX,19); mc.stroke();
+    mc.fillStyle='rgba(255,200,87,.9)'; mc.fillRect((trace.midpointX/DX)*SX-1,15,2,8);
+  });
+  // geometry
+  recs.forEach((r,n)=>{
+    const x=r.i*SX, y=r.j*SZ;
+    const receiverHighlighted=selectedCmpTraces().some(t=>t.receiverId===r.id);
+    mc.fillStyle=receiverHighlighted?'#ffc857':'#e8ecf1';
+    mc.beginPath(); mc.moveTo(x,y+9); mc.lineTo(x-4,y+2); mc.lineTo(x+4,y+2); mc.closePath(); mc.fill();
+    if(n===0||n===recs.length-1||n%8===0){ mc.font='9px ui-sans-serif,sans-serif'; mc.fillText(`R${r.id}`,x-6,y+20); }
+  });
+  shotPositions.forEach((shot,shotIndex)=>{
+    const sx=shot.i*SX, sy=shot.j*SZ;
+    const isActive=activeShotId===shot.id && (running||paused);
+    const contributes=selectedCmpTraces().some(t=>t.shotId===shot.id);
+    mc.save(); mc.translate(sx,sy+6); mc.fillStyle=contributes?'#ffc857':(isActive?'#ff6b6b':'#ff4d4d');
+    mc.beginPath();
+    for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?3:7;mc.lineTo(Math.cos(a)*rr,Math.sin(a)*rr);}
+    mc.closePath();mc.fill();mc.strokeStyle=isActive?'#fff':'#3b1010';mc.stroke();mc.restore();
+    if(shotIndex===0||shotIndex===shotPositions.length-1||shotIndex%4===0||shot.id===selectedShotId||isActive){mc.fillStyle=contributes?'#ffc857':'#fff';mc.font='10px ui-sans-serif,sans-serif';mc.fillText(`S${shot.id}`,sx-7,Math.max(12,sy-9));}
+  });
+  if(tool==='layer'){
+    for(let k=1;k<layers.length;k++)layers[k].knees.forEach((knee,n)=>{
+      const x=knee.x*CW,y=knee.z*CH,selected=k===selectedInterface;
+      mc.beginPath();mc.arc(x,y,selected?5:4,0,Math.PI*2);mc.fillStyle=selected?'#ffc857':'#dbe5ef';mc.fill();mc.strokeStyle='#10151b';mc.lineWidth=2;mc.stroke();
+      if(selected){mc.fillStyle='#11161d';mc.font='8px ui-sans-serif';mc.fillText(String(n+1),x-2.5,y+2.8);}
+    });
+  }
+}
+
+function drawGather(){
+  const W=gCan.width, H=gCan.height;
+  gc.fillStyle='#0b0e12'; gc.fillRect(0,0,W,H);
+  const L=42, R=10, T=22, B=14;
+  const pw=W-L-R, ph=H-T-B;
+  const n=recs.length;
+  if(!traces||!n) return;
+  const dxTr=pw/n;
+  const displayAmax=robustTraceArrayAmplitude(traces.slice(0,n));
+  const amp=dxTr*1.6/Math.max(displayAmax,1e-9);
+  const shown = running? it : nt;
+
+  // time axis
+  gc.strokeStyle='#232a33'; gc.fillStyle='#8a949f';
+  gc.font='10px ui-sans-serif,sans-serif';
+  for(let s=0;s<=tmax+1e-6;s+=0.2){
+    const y=T+ (s/tmax)*ph;
+    gc.beginPath(); gc.moveTo(L,y); gc.lineTo(W-R,y); gc.stroke();
+    gc.fillText(s.toFixed(1)+'s', 4, y+3);
+  }
+  // offset annotation, measured from the shot
+  const offNear=Math.abs(recs[0].i-src.i)*DX;
+  const offFar =Math.abs(recs[n-1].i-src.i)*DX;
+  gc.fillText(`offset ${offNear.toFixed(0)} m →`, L, 13);
+  const fw=gc.measureText(`${offFar.toFixed(0)} m`).width;
+  gc.fillText(`${offFar.toFixed(0)} m`, W-R-fw, 13);
+
+  for(let k=0;k<n;k++){
+    const x0=L+dxTr*(k+0.5);
+    gc.strokeStyle='#7fd3ff'; gc.lineWidth=1;
+    gc.beginPath();
+    const tr=traces[k];
+    // wiggle
+    for(let t=0;t<shown;t++){
+      const y=T+(t/nt)*ph;
+      const x=x0+tr[t]*amp;
+      t? gc.lineTo(x,y) : gc.moveTo(x,y);
+    }
+    gc.stroke();
+    // positive fill
+    gc.fillStyle='rgba(127,211,255,.45)';
+    gc.beginPath(); gc.moveTo(x0,T);
+    for(let t=0;t<shown;t++){
+      const y=T+(t/nt)*ph;
+      const x=x0+Math.max(0,tr[t])*amp;
+      gc.lineTo(x,y);
+    }
+    gc.lineTo(x0,T+(Math.max(shown-1,0)/nt)*ph);
+    gc.closePath(); gc.fill();
+  }
+}
+
+/* Variable-density (grayscale) display of the same gather.
+   Amplitude maps to brightness; traces are interpolated laterally so the
+   image reads as continuous events rather than isolated columns. */
+const grCan=document.getElementById('gray'), grc=grCan.getContext('2d');
+let grImg=null;
+function drawGray(){
+  const W=grCan.width, H=grCan.height;
+  grc.fillStyle='#0b0e12'; grc.fillRect(0,0,W,H);
+  const L=42,R=10,T=22,B=14;
+  const pw=W-L-R, ph=H-T-B;
+  const n=recs.length;
+  if(!traces||!n||pw<1||ph<1) return;
+  if(!grImg||grImg.width!==pw||grImg.height!==ph) grImg=grc.createImageData(pw,ph);
+  const d=grImg.data;
+  const shown = running? it : nt;
+  const scale = 1/Math.max(robustTraceArrayAmplitude(traces.slice(0,n)),1e-9);
+  for(let y=0;y<ph;y++){
+    // map pixel row -> sample index
+    const ti=Math.min(nt-1, Math.floor((y/ph)*nt));
+    const valid = ti<shown;
+    for(let x=0;x<pw;x++){
+      // map pixel col -> fractional trace, linear interp between neighbours
+      const tf=(x/pw)*n-0.5;
+      const i0=Math.max(0,Math.min(n-1,Math.floor(tf)));
+      const i1=Math.max(0,Math.min(n-1,i0+1));
+      const w=tf-i0;
+      let v=0;
+      if(valid) v=(traces[i0][ti]*(1-w)+traces[i1][ti]*w)*scale;
+      // symmetric grey ramp: negative dark, zero mid, positive light
+      let g=Math.round(128+Math.max(-1,Math.min(1,v*2.2))*127);
+      const o=(y*pw+x)*4;
+      d[o]=d[o+1]=d[o+2]=g; d[o+3]=255;
+    }
+  }
+  grc.putImageData(grImg,L,T);
+  // axes
+  grc.strokeStyle='#232a33'; grc.fillStyle='#8a949f';
+  grc.font='10px ui-sans-serif,sans-serif';
+  for(let s=0;s<=tmax+1e-6;s+=0.2){
+    const y=T+(s/tmax)*ph;
+    grc.fillText(s.toFixed(1)+'s',4,y+3);
+  }
+  const offNear=Math.abs(recs[0].i-src.i)*DX;
+  const offFar =Math.abs(recs[n-1].i-src.i)*DX;
+  grc.fillText(`${offNear.toFixed(0)} m →`,L,13);
+  const fw=grc.measureText(`${offFar.toFixed(0)} m`).width;
+  grc.fillText(`${offFar.toFixed(0)} m`,W-R-fw,13);
+}
+
+function recordAmplitude(records){
+  let a=1e-9;
+  records.forEach(r=>{for(let i=0;i<r.samples.length;i++) a=Math.max(a,Math.abs(r.samples[i]));});
+  return a;
+}
+
+/* A colocated source/receiver can produce one very large direct-arrival trace.
+   Using that single maximum to scale every trace makes interior shots look
+   artificially weak. Use a robust upper quartile of per-trace peaks instead,
+   preserving relative amplitudes while preventing one trace from compressing
+   the whole gather. */
+function robustGatherAmplitude(records){
+  if(!records||!records.length)return 1e-9;
+  const peaks=records.map(record=>{
+    let peak=1e-9;const stride=Math.max(1,Math.floor(record.samples.length/240));
+    for(let i=0;i<record.samples.length;i+=stride)peak=Math.max(peak,Math.abs(record.samples[i]));
+    return peak;
+  }).sort((a,b)=>a-b);
+  return peaks[Math.floor(.75*(peaks.length-1))]||1e-9;
+}
+
+function robustTraceArrayAmplitude(traceArrays){
+  return robustGatherAmplitude((traceArrays||[]).map(samples=>({samples})));
+}
+
+function robustDisplayAmplitude(records,quantile=.985){
+  const values=[];
+  records.forEach(record=>{
+    const stride=Math.max(1,Math.floor(record.samples.length/420));
+    for(let i=0;i<record.samples.length;i+=stride){const v=Math.abs(record.samples[i]);if(v>0)values.push(v);}
+  });
+  if(!values.length)return 1e-9;
+  values.sort((a,b)=>a-b);
+  return Math.max(1e-9,values[Math.min(values.length-1,Math.floor((values.length-1)*quantile))]);
+}
+
+function orderRecords(records,axis){
+  return records.slice().sort((a,b)=>{
+    if(axis==='receiver') return a.receiverX-b.receiverX;
+    if(axis==='shot') return a.sourceX-b.sourceX;
+    return a.sourceReceiverOffset-b.sourceReceiverOffset;
+  });
+}
+
+/* Shared renderer for CSP, CRG, CMP and NMO panels. Trace arrays always remain
+   references to the acquisition database; only the lightweight metadata list
+   is re-ordered. */
+function drawTraceGather(canvas,records,options={}){
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  const L=options.compact?28:44,R=10,T=24,B=25,pw=W-L-R,ph=H-T-B;
+  if(!records||!records.length){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(options.empty||'No traces',L,T+18);canvas._traceRecords=[];return;}
+  const ordered=orderRecords(records,options.axis||'offset'); canvas._traceRecords=ordered;
+  const n=ordered.length,dxTr=pw/n,amax=options.amax??robustGatherAmplitude(ordered),displayGain=options.displayGain||1;
+  const amp=dxTr*1.45*displayGain/Math.max(amax,1e-9),duration=Math.max(...ordered.map(r=>r.dt*r.nt));
+  const displacement=value=>options.clipTraces?Math.max(-1,Math.min(1,value/Math.max(amax,1e-9)*displayGain))*dxTr*.46:value*amp;
+  if(options.variableDensity&&pw>0&&ph>0){
+    const image=ctx.createImageData(pw,ph),pixels=image.data;
+    for(let y=0;y<ph;y++){
+      const tf=y/Math.max(1,ph-1);
+      for(let x=0;x<pw;x++){
+        const traceFloat=x/pw*n-.5,i0=Math.max(0,Math.min(n-1,Math.floor(traceFloat))),i1=Math.max(0,Math.min(n-1,i0+1)),mix=Math.max(0,Math.min(1,traceFloat-i0));
+        const a0=Math.min(ordered[i0].nt-1,Math.round(tf*(ordered[i0].nt-1))),a1=Math.min(ordered[i1].nt-1,Math.round(tf*(ordered[i1].nt-1)));
+        const sample=ordered[i0].samples[a0]*(1-mix)+ordered[i1].samples[a1]*mix;
+        const normalized=Math.max(-1,Math.min(1,sample/Math.max(amax,1e-9)*displayGain));
+        const o=(y*pw+x)*4;
+        if(options.densityColor){
+          const a=Math.abs(normalized),positive=normalized>=0;
+          pixels[o]=positive?16+Math.round(210*a):10+Math.round(24*a);
+          pixels[o+1]=positive?28+Math.round(222*a):26+Math.round(88*a);
+          pixels[o+2]=positive?42+Math.round(213*a):44+Math.round(175*a);
+        } else {
+          const grey=Math.max(4,Math.min(132,Math.round(38+74*normalized)));
+          pixels[o]=pixels[o+1]=pixels[o+2]=grey;
+        }
+        pixels[o+3]=255;
+      }
+    }
+    ctx.putImageData(image,L,T);
+  }
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#8a949f';ctx.font=options.compact?'9px ui-sans-serif':'10px ui-sans-serif';
+  const tick=duration>1.8?.4:.2;
+  for(let s=0;s<=duration+1e-6;s+=tick){const y=T+s/duration*ph;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(W-R,y);ctx.stroke();ctx.fillText(s.toFixed(1),3,y+3);}
+  const cmpKeys=selectedCmpKeys();
+  ordered.forEach((record,k)=>{
+    const x0=L+dxTr*(k+.5),isCmp=!options.suppressCmpHighlight&&cmpKeys.has(traceKey(record)),isSelected=selectedTraceKey===traceKey(record);
+    if(isCmp){ctx.fillStyle=isSelected?'rgba(255,200,87,.34)':'rgba(255,200,87,.18)';ctx.fillRect(L+dxTr*k,T,Math.max(1,dxTr),ph);}
+    else if(isSelected){ctx.fillStyle='rgba(255,200,87,.16)';ctx.fillRect(L+dxTr*k,T,Math.max(1,dxTr),ph);}
+    if(options.valid&&options.valid[k]){
+      const mask=options.valid[k];ctx.fillStyle='rgba(255,179,92,.10)';let start=-1;
+      for(let a=0;a<=mask.length;a++){
+        const dead=a===mask.length||!mask[a];
+        if(dead&&start<0) start=a;
+        if(!dead&&start>=0){ctx.fillRect(L+dxTr*k,T+start/mask.length*ph,Math.max(1,dxTr),(a-start)/mask.length*ph);start=-1;}
+      }
+      if(start>=0)ctx.fillRect(L+dxTr*k,T+start/mask.length*ph,Math.max(1,dxTr),(mask.length-start)/mask.length*ph);
+    }
+    const tr=record.samples,mask=options.valid?.[k];ctx.strokeStyle=options.traceColor||(isCmp?'#ffc857':'#7fd3ff');ctx.lineWidth=options.lineWidth||(isCmp?1.35:1.15);ctx.beginPath();let drawing=false;
+    for(let a=0;a<tr.length;a++){if(mask&&!mask[a]){drawing=false;continue;}const y=T+a/(tr.length-1)*ph,x=x0+displacement(tr[a]);drawing?ctx.lineTo(x,y):ctx.moveTo(x,y);drawing=true;}ctx.stroke();
+    if(options.positiveFill!==false){ctx.fillStyle=options.fillColor||(isCmp?'rgba(255,200,87,.32)':'rgba(127,211,255,.38)');ctx.beginPath();ctx.moveTo(x0,T);
+      for(let a=0;a<tr.length;a++){ctx.lineTo(x0+Math.max(0,displacement(tr[a])),T+a/(tr.length-1)*ph);}ctx.lineTo(x0,T+ph);ctx.closePath();ctx.fill();}
+  });
+  ctx.fillStyle='#8a949f';
+  const axis=options.axis||'offset';
+  const value=r=>axis==='receiver'?r.receiverX:axis==='shot'?r.sourceX:r.sourceReceiverOffset;
+  const first=value(ordered[0]),last=value(ordered[n-1]);
+  ctx.fillText(`${first.toFixed(0)} m`,L,H-8);const lastText=`${last.toFixed(0)} m`;ctx.fillText(lastText,W-R-ctx.measureText(lastText).width,H-8);
+  const title=options.title||({receiver:'receiver x',shot:'shot x',offset:'signed offset'}[axis]);ctx.fillText(title,L,13);
+  if(options.hyperbola){
+    const {t0,velocity}=options.hyperbola;ctx.strokeStyle='#ff6b6b';ctx.lineWidth=1.5;ctx.setLineDash([5,3]);ctx.beginPath();
+    ordered.forEach((r,k)=>{const time=moveoutTime(t0,r.sourceReceiverOffset,velocity,options.hyperbola.delay??sourceWaveletDelay());const x=L+dxTr*(k+.5),y=T+time/duration*ph;k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();ctx.setLineDash([]);
+  }
+  if(options.referenceCurve){
+    ctx.strokeStyle=options.referenceColor||'#ffc857';ctx.lineWidth=1.5;ctx.setLineDash([2,3]);ctx.beginPath();let drawing=false;
+    ordered.forEach((r,k)=>{const time=options.referenceCurve(r);if(time===null||!Number.isFinite(time)){drawing=false;return;}const x=L+dxTr*(k+.5),y=T+time/duration*ph;drawing?ctx.lineTo(x,y):ctx.moveTo(x,y);drawing=true;});ctx.stroke();ctx.setLineDash([]);
+  }
+}
+
+function inspectTrace(trace){
+  if(!trace)return; selectedTraceKey=traceKey(trace); selectedCmpIndex=trace.cmpIndex;
+  const low=trace.cmpCenter-cmpBinSize/2,high=trace.cmpCenter+cmpBinSize/2;
+  document.getElementById('lineage').innerHTML=
+    `<span class="gold">Shot S${trace.shotId} → Receiver R${trace.receiverId}</span><br>`+
+    `Source x = ${trace.sourceX.toFixed(0)} m · Receiver x = ${trace.receiverX.toFixed(0)} m<br>`+
+    `Midpoint = (${trace.sourceX.toFixed(0)} + ${trace.receiverX.toFixed(0)}) / 2 = <strong>${trace.midpointX.toFixed(1)} m</strong><br>`+
+    `Offset = ${trace.receiverX.toFixed(0)} − ${trace.sourceX.toFixed(0)} = <strong>${trace.sourceReceiverOffset.toFixed(0)} m</strong><br>`+
+    `CMP ${trace.cmpIndex} · bin ${low.toFixed(1)}–${high.toFixed(1)} m`;
+  sembDirty=true;drawCmpViews();drawAcquisitionViews();render();
+}
+
+function installTracePicker(canvas,callback){
+  if(canvas._tracePickerInstalled)return;canvas._tracePickerInstalled=true;
+  canvas.addEventListener('click',e=>{const list=canvas._traceRecords||[];if(!list.length)return;const b=canvas.getBoundingClientRect();const x=(e.clientX-b.left)*canvas.width/b.width;const L=canvas.width<250?28:44,R=10;const k=Math.max(0,Math.min(list.length-1,Math.floor((x-L)/(canvas.width-L-R)*list.length)));const tr=list[k];if(callback)callback(tr);else inspectTrace(tr);});
+}
+
+function upsertShotCard(shot){
+  const gallery=document.getElementById('shotGallery');
+  gallery.querySelector('.empty')?.remove();
+  gallery.querySelector(`[data-shot-id="${shot.id}"]`)?.remove();
+  gallery.querySelectorAll('.shot-card.on').forEach(card=>card.classList.remove('on'));
+  const card=document.createElement('div');card.dataset.shotId=shot.id;
+  card.className='shot-card'+(shot.id===selectedShotId?' on':'');
+  card.innerHTML=`<h3>Shot S${shot.id}</h3><div class="hint"><span>x = ${shot.sourceX.toFixed(0)} m</span><span>${shot.receivers.length} traces</span></div>`;
+  const cv=document.createElement('canvas');cv.width=174;cv.height=150;card.appendChild(cv);
+  const next=[...gallery.querySelectorAll('.shot-card')].find(el=>+el.dataset.shotId>shot.id);
+  gallery.insertBefore(card,next||null);
+  const records=acquisitionTraces.filter(t=>t.shotId===shot.id);
+  drawTraceGather(cv,records,{compact:true,axis:document.getElementById('shotAxis').value});
+  installTracePicker(cv,tr=>{selectedShotId=shot.id;inspectTrace(tr);refreshShotGallery();});
+  card.addEventListener('click',e=>{if(e.target!==cv){selectedShotId=shot.id;drawAcquisitionViews();refreshShotGallery();}});
+}
+
+function refreshShotGallery(){
+  const gallery=document.getElementById('shotGallery');gallery.innerHTML='';
+  if(!shotRecords.length){gallery.innerHTML='<div class="empty wide">Completed shots appear here without being erased by later shots.</div>';return;}
+  shotRecords.forEach(upsertShotCard);
+}
+
+function refreshReceiverControls(){
+  const select=document.getElementById('receiverSelect'),old=+select.value||selectedReceiverId;select.innerHTML='';
+  recs.forEach(r=>{const o=document.createElement('option');o.value=r.id;o.textContent=`R${r.id} · ${r.i*DX} m`;select.appendChild(o);});
+  selectedReceiverId=recs.some(r=>r.id===old)?old:(recs[0]?.id||null);if(selectedReceiverId!==null)select.value=selectedReceiverId;
+}
+
+function drawAcquisitionViews(){
+  const shotRecordsView=acquisitionTraces.filter(t=>t.shotId===selectedShotId);
+  drawTraceGather(document.getElementById('acqGather'),shotRecordsView,{axis:document.getElementById('shotAxis').value,empty:'Select a completed shot'});
+  const receiverRecords=acquisitionTraces.filter(t=>t.receiverId===selectedReceiverId);
+  drawTraceGather(document.getElementById('receiverGather'),receiverRecords,{axis:document.getElementById('receiverAxis').value,empty:'No shots recorded at this receiver'});
+  const receiver=recs.find(r=>r.id===selectedReceiverId);
+  document.getElementById('receiverInfo').textContent=receiver?`Common Receiver Gather · R${receiver.id} · x = ${receiver.i*DX} m · Fold = ${receiverRecords.length} shots`:'No receiver selected.';
+  document.querySelectorAll('.shot-card canvas').forEach(cv=>drawTraceGather(cv,cv._traceRecords||[],{compact:true,axis:document.getElementById('shotAxis').value}));
+}
+
+function renderModelFrame(){mc.clearRect(0,0,CW,CH);drawModel();}
+function render(){renderModelFrame();drawGather();drawGray();if(currentStage==='nmo')drawNmo();}
+
+/* Canvas drawing was formerly performed after every solver batch. At 4x and
+   above the two live gathers plus the wavefield cost more than the batch, so
+   requestAnimationFrame slowed down and swallowed most of the requested
+   speedup. Decouple display cadence from numerical stepping: the wavefield
+   stays animated, while expensive gather redraws become progressively less
+   frequent in turbo modes. */
+function renderAcquisitionLive(now,force=false){
+  const waveHz=simulationSpeed<=1?45:simulationSpeed<=2?30:simulationSpeed<=4?20:simulationSpeed<=8?8:4;
+  const gatherHz=simulationSpeed<=1?20:simulationSpeed<=2?14:simulationSpeed<=4?8:simulationSpeed<=8?3:1;
+  if(force||now-lastWavefieldPaint>=1000/waveHz){renderModelFrame();lastWavefieldPaint=now;}
+  if(force||now-lastGatherPaint>=1000/gatherHz){drawGather();drawGray();lastGatherPaint=now;}
+}
+
+/* ---------------- semblance ---------------- */
+/* Semblance over a (t0, v) grid. For each candidate velocity we gather the
+   samples along the corresponding hyperbola and measure coherence:
+       S = sum_w (sum_k a_k)^2 / ( N * sum_w sum_k a_k^2 )
+   i.e. energy of the stack over stacked energy, in a short time window w.
+   S is 1 for perfectly aligned traces and ~1/N for incoherent noise, so
+   reflections show as bright spots at their stacking velocity. */
+const SEMB_NV = 90;              // velocity samples
+let sembVmin=1200, sembVmax=6000;
+let sembNT = 0;                  // t0 samples (set from record length)
+let semb = null;                 // Float32Array(sembNT*SEMB_NV)
+let sembMax = 1e-9;
+let sembDirty = true;            // recompute lazily: semblance is expensive
+const SEMB_WIN = 6;              // half-window in samples
+
+function ensureSemblance(){
+  if(sembDirty){ computeSemblance(); sembDirty=false; }
+}
+
+function computeSemblance(){
+  const records=selectedCmpTraces(),n=records.length;
+  if(!n){ semb=null; return; }
+  const localNt=Math.min(...records.map(r=>r.nt)),localDt=records[0].dt;
+  sembNT = Math.min(520, localNt);              // retain enough t0 samples for a crisp display
+  semb = new Float32Array(sembNT*SEMB_NV);
+  sembMax = 1e-9;
+
+  for(let vi=0; vi<SEMB_NV; vi++){
+    const v = sembVmin + (sembVmax-sembVmin)*vi/(SEMB_NV-1);
+    for(let ai=0; ai<sembNT; ai++){
+      const a0 = Math.floor(ai*localNt/sembNT);
+      const t0 = a0*localDt;
+      let num=0, den=0;
+      // short window around the hyperbola improves stability
+      for(let w=-SEMB_WIN; w<=SEMB_WIN; w++){
+        let sum=0, sq=0, live=0;
+        for(const record of records){
+          const sourceReceiverOffset=record.sourceReceiverOffset;
+          const t=moveoutTime(t0,sourceReceiverOffset,v);
+          const f=t/record.dt + w;
+          const i0=Math.floor(f);
+          if(i0<0 || i0+1>=record.nt) continue;
+          const fr=f-i0;
+          const s=record.samples[i0]*(1-fr)+record.samples[i0+1]*fr;
+          sum+=s; sq+=s*s; live++;
+        }
+        if(live>0){ num+=sum*sum; den+=live*sq; }
+      }
+      const S = den>0 ? num/den : 0;
+      semb[ai*SEMB_NV+vi]=S;
+      if(S>sembMax) sembMax=S;
+    }
+  }
+}
+/* ---------------- NMO ---------------- */
+/* Velocity picks: a list of (t0, v) control points defining v(t0). When picks
+   exist they override the constant-velocity slider; between picks the function
+   is linearly interpolated, and it is held constant beyond the ends. */
+let picks = [];                  // [{t0, v}] kept sorted by t0
+let velocitySource='manual';
+let selectedHyperbolaT0=.45;
+let hyperbolaSnapInfo=null;
+
+/* The causal Ricker is centred after time zero. Recorded reflection phases
+   therefore follow td + sqrt((t0-td)^2 + x^2/v^2), where displayed t0 includes
+   the source delay. Keeping this in one function prevents the overlay,
+   semblance and NMO sampler from silently using different time conventions. */
+function sourceWaveletDelay(){return 1.1/f0;}
+function moveoutTime(t0,offset,velocity,delay=sourceWaveletDelay()){
+  if(!(velocity>0))return Infinity;
+  const physicalT0=Math.max(0,t0-delay);
+  return delay+Math.sqrt(physicalT0*physicalT0+(offset*offset)/(velocity*velocity));
+}
+
+function interpolateVelocity(points,t0,fallback=vnmo){
+  if(!points.length)return fallback;
+  if(t0<=points[0].t0)return points[0].v;
+  if(t0>=points[points.length-1].t0)return points[points.length-1].v;
+  for(let k=0;k<points.length-1;k++){
+    const a=points[k],b=points[k+1];
+    if(t0>=a.t0&&t0<=b.t0){const w=(t0-a.t0)/Math.max(1e-9,b.t0-a.t0);return a.v+(b.v-a.v)*w;}
+  }
+  return fallback;
+}
+
+function modelInterfaceDepth(interfaceIndex,modelI){
+  return Math.max(0,Math.min(1,ifaceZ(interfaceIndex,modelI)))*MZ*DX;
+}
+
+/* One-way thickness and two-way vertical interval time from the acquisition
+   datum to a chosen reflector. Sources and receivers sit SURF*DX metres below
+   model zero, so the first layer must start at that datum rather than z=0. */
+function modelVerticalSegmentsAt(midpointX,throughInterface=layers.length-1){
+  const modelI=Math.max(0,Math.min(MX-1,Math.round(midpointX/DX)));
+  const segments=[];
+  for(let k=0;k<Math.min(throughInterface,layers.length-1);k++){
+    const top=k===0?Math.max(SURF*DX,modelInterfaceDepth(0,modelI)):modelInterfaceDepth(k,modelI);
+    const bottom=modelInterfaceDepth(k+1,modelI),thickness=Math.max(0,bottom-top),velocity=layers[k].vp;
+    if(thickness>0)segments.push({layerIndex:k,thickness,velocity,intervalT:2*thickness/velocity});
+  }
+  return segments;
+}
+
+function modelRmsFunctionAt(midpointX){
+  let sumT=0,sumV2T=0;const points=[{t0:0,v:layers[0].vp,interfaceIndex:0}],delay=sourceWaveletDelay();
+  const segments=modelVerticalSegmentsAt(midpointX);
+  segments.forEach((segment,k)=>{
+    sumT+=segment.intervalT;sumV2T+=segment.velocity*segment.velocity*segment.intervalT;
+    points.push({t0:delay+sumT,v:Math.sqrt(sumV2T/sumT),interfaceIndex:k+1});
+  });
+  return points;
+}
+
+/* Exact time-weighted RMS through the current interval, rather than a linear
+   interpolation between the RMS values at adjacent interfaces. */
+function modelVAt(t0,midpointX){
+  const physicalT=Math.max(0,t0-sourceWaveletDelay());
+  if(physicalT<=0)return layers[0].vp;
+  let remaining=physicalT,sumT=0,sumV2T=0;
+  for(const segment of modelVerticalSegmentsAt(midpointX)){
+    const used=Math.min(remaining,segment.intervalT);
+    sumT+=used;sumV2T+=segment.velocity*segment.velocity*used;remaining-=used;
+    if(remaining<=1e-12)return Math.sqrt(sumV2T/sumT);
+  }
+  const lastV=layers[layers.length-1].vp;
+  sumT+=remaining;sumV2T+=lastV*lastV*remaining;
+  return Math.sqrt(sumV2T/sumT);
+}
+
+/* Exact Snell-law reflection time for a locally horizontal layered model.
+   This is a reference curve for wide offsets; the active red NMO curve remains
+   the conventional RMS hyperbola used by the processor. */
+function exactLayeredTime(segments,offset){
+  if(!segments.length)return null;
+  const target=Math.abs(offset),maxV=Math.max(...segments.map(s=>s.velocity));
+  if(target<1e-9)return 2*segments.reduce((sum,s)=>sum+s.thickness/s.velocity,0);
+  let lo=0,hi=.999999/maxV;
+  for(let n=0;n<60;n++){
+    const p=(lo+hi)/2;
+    const x=2*segments.reduce((sum,s)=>{const pv=p*s.velocity;return sum+s.thickness*pv/Math.sqrt(Math.max(1e-12,1-pv*pv));},0);
+    if(x<target)lo=p;else hi=p;
+  }
+  const p=(lo+hi)/2;
+  return 2*segments.reduce((sum,s)=>{const pv=p*s.velocity;return sum+s.thickness/(s.velocity*Math.sqrt(Math.max(1e-12,1-pv*pv)));},0);
+}
+
+function exactModelMoveoutTime(t0,offset,midpointX){
+  if(modelHasLateralVariation())return null;
+  const reflectors=modelRmsFunctionAt(midpointX).slice(1);
+  if(!reflectors.length)return null;
+  const reflector=reflectors.reduce((best,p)=>Math.abs(p.t0-t0)<Math.abs(best.t0-t0)?p:best,reflectors[0]);
+  const physical=exactLayeredTime(modelVerticalSegmentsAt(midpointX,reflector.interfaceIndex),offset);
+  return physical===null?null:sourceWaveletDelay()+physical;
+}
+
+function vAt(t0,midpointX=selectedCmpIndex===null?0:cmpOrigin+selectedCmpIndex*cmpBinSize){
+  if(velocitySource==='constant')return vnmo;
+  if(velocitySource==='model')return modelVAt(t0,midpointX);
+  if(!picks.length) return vnmo;
+  return interpolateVelocity(picks,t0,vnmo);
+}
+/* Normal moveout: an event from a flat reflector at displayed zero-offset time
+   t0 arrives at the delay-aware moveout time returned above. Correcting means,
+   for each output sample t0, reading the input at that time and writing it to
+   t0 -- flattening the hyperbola.
+   NMO stretches the output wavelet because the mapping from input time t to
+   corrected time t0 is nonlinear. The fractional measure (t-t0)/t0 is used
+   here for a transparent teaching stretch mute. */
+let vnmo=2000, stretchLimit=0.5;
+
+function applyNMO(records,velocityFunction=(t0,m)=>vAt(t0,m),limit=stretchLimit,delay=sourceWaveletDelay()){
+  if(!records||!records.length)return null;
+  const correctedRecords=[],valid=[];
+  records.forEach(record=>{
+    const sourceReceiverOffset=record.sourceReceiverOffset;
+    const o=new Float32Array(record.nt),mask=new Uint8Array(record.nt);
+    for(let a=0;a<record.nt;a++){
+      const t0=a*record.dt;
+      const velocity=velocityFunction(t0,record.midpointX);
+      const t=moveoutTime(t0,sourceReceiverOffset,velocity,delay);
+      const f=t/record.dt;
+      const i0=Math.floor(f);
+      if(i0<0||i0+1>=record.nt) continue;
+      const physicalT0=t0-delay,fractionalStretch=physicalT0>0?(t-t0)/physicalT0:Infinity;
+      if(limit!==null && fractionalStretch>limit) continue;
+      const w=f-i0;
+      o[a]=record.samples[i0]*(1-w)+record.samples[i0+1]*w;mask[a]=1;
+    }
+    correctedRecords.push({...record,samples:o});valid.push(mask);
+  });
+  return {correctedRecords,valid};
+}
+
+function nmoTraces(){return applyNMO(selectedCmpTraces());}
+
+function sampleTraceAtTime(record,time){
+  const f=time/record.dt,i0=Math.floor(f);
+  if(i0<0||i0+1>=record.nt)return null;
+  const w=f-i0;return record.samples[i0]*(1-w)+record.samples[i0+1]*w;
+}
+
+/* Snap a raw-gather click to the strongest coherent phase among the traces
+   nearest zero offset. This makes the selected t0 refer to a real event phase
+   instead of an arbitrary pixel between wavelet lobes. */
+function snapHyperbolaT0(clickedT0,records){
+  if(!records.length)return {t0:clickedT0,delta:0,count:0};
+  const near=records.slice().sort((a,b)=>Math.abs(a.sourceReceiverOffset)-Math.abs(b.sourceReceiverOffset)).slice(0,Math.min(7,records.length));
+  const dt=near[0].dt,radius=Math.max(2,Math.round((.65/f0)/dt)),center=Math.round(clickedT0/dt);
+  let bestT0=clickedT0,bestScore=-Infinity;
+  for(let a=Math.max(0,center-radius);a<=Math.min(near[0].nt-2,center+radius);a++){
+    const candidate=a*dt;let sum=0,sq=0,live=0;
+    for(const record of near){
+      const velocity=vAt(candidate,record.midpointX),sample=sampleTraceAtTime(record,moveoutTime(candidate,record.sourceReceiverOffset,velocity));
+      if(sample===null)continue;sum+=sample;sq+=sample*sample;live++;
+    }
+    if(!live||sq<=0)continue;
+    const coherence=sum*sum/(live*sq),energy=Math.sqrt(sq/live),score=coherence*energy;
+    if(score>bestScore){bestScore=score;bestT0=candidate;}
+  }
+  return {t0:bestT0,delta:bestT0-clickedT0,count:near.length};
+}
+
+function hyperbolaResidualStats(records,t0,velocity){
+  if(!records.length)return null;
+  const residuals=[],searchSeconds=.30/f0;
+  for(const record of records){
+    const predicted=moveoutTime(t0,record.sourceReceiverOffset,velocity),center=Math.round(predicted/record.dt),radius=Math.max(1,Math.round(searchSeconds/record.dt));
+    let best=-1,bestAmp=-1;
+    for(let a=Math.max(0,center-radius);a<=Math.min(record.nt-1,center+radius);a++){
+      const amp=Math.abs(record.samples[a]);if(amp>bestAmp){bestAmp=amp;best=a;}
+    }
+    if(best>=0)residuals.push(best*record.dt-predicted);
+  }
+  if(!residuals.length)return null;
+  const bias=residuals.reduce((a,b)=>a+b,0)/residuals.length,rms=Math.sqrt(residuals.reduce((a,b)=>a+b*b,0)/residuals.length);
+  return {bias,rms,count:residuals.length};
+}
+
+function velocitySourceLabel(){
+  if(velocitySource==='model')return 'exact RMS from model';
+  if(velocitySource==='constant')return 'constant velocity';
+  return picks.length?'manual picks':'manual mode fallback';
+}
+
+function stackOf(nmoResult){
+  if(!nmoResult||!nmoResult.correctedRecords.length) return null;
+  const records=nmoResult.correctedRecords,localNt=Math.min(...records.map(r=>r.nt));
+  const samples=new Float32Array(localNt),liveFold=new Uint16Array(localNt);
+  for(let a=0;a<localNt;a++){
+    let sum=0,cnt=0;
+    for(let k=0;k<records.length;k++){
+      if(nmoResult.valid[k][a]){sum+=records[k].samples[a];cnt++;}
+    }
+    samples[a]=cnt?sum/cnt:0;liveFold[a]=cnt;
+  }
+  return {samples,liveFold,dt:records[0].dt,nt:localNt};
+}
+
+/* generic wiggle panel used by the NMO tab */
+function wigglePanel(ctx,cv,data,label,amax){
+  const W=cv.width,H=cv.height;
+  ctx.fillStyle='#0b0e12'; ctx.fillRect(0,0,W,H);
+  const L=34,R=8,T=20,B=14, pw=W-L-R, ph=H-T-B;
+  if(!data||!data.length) return;
+  const n=data.length, dxTr=pw/n;
+  const amp=dxTr*1.6/Math.max(amax,1e-9);
+  ctx.strokeStyle='#232a33'; ctx.fillStyle='#8a949f';
+  ctx.font='10px ui-sans-serif,sans-serif';
+  for(let s=0;s<=tmax+1e-6;s+=0.2){
+    const y=T+(s/tmax)*ph;
+    ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(W-R,y); ctx.stroke();
+    ctx.fillText(s.toFixed(1),4,y+3);
+  }
+  ctx.fillText(label,L,12);
+  for(let k=0;k<n;k++){
+    const x0=L+dxTr*(k+0.5), tr=data[k];
+    ctx.strokeStyle='#7fd3ff'; ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let a=0;a<nt;a++){
+      const y=T+(a/nt)*ph, x=x0+tr[a]*amp;
+      a?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.stroke();
+    ctx.fillStyle='rgba(127,211,255,.45)';
+    ctx.beginPath(); ctx.moveTo(x0,T);
+    for(let a=0;a<nt;a++){
+      const y=T+(a/nt)*ph, x=x0+Math.max(0,tr[a])*amp;
+      ctx.lineTo(x,y);
+    }
+    ctx.lineTo(x0,T+ph); ctx.closePath(); ctx.fill();
+  }
+}
+
+/* semblance panel: velocity across, t0 down, heat colormap, picks overlaid */
+const sembCan=document.getElementById('sembC'), sc=sembCan.getContext('2d');
+const S_L=34,S_R=8,S_T=20,S_B=26;
+let sembImg=null;
+function sembGeom(){
+  return {L:S_L,T:S_T,pw:sembCan.width-S_L-S_R,ph:sembCan.height-S_T-S_B};
+}
+function drawSemb(){
+  const W=sembCan.width,H=sembCan.height;
+  sc.fillStyle='#0b0e12'; sc.fillRect(0,0,W,H);
+  const {L,T,pw,ph}=sembGeom();
+  if(pw<1||ph<1) return;
+  if(semb){
+    if(!sembImg||sembImg.width!==pw||sembImg.height!==ph) sembImg=sc.createImageData(pw,ph);
+    const d=sembImg.data;
+    for(let y=0;y<ph;y++){
+      const ai=Math.min(sembNT-1,Math.floor(y/ph*sembNT));
+      for(let x=0;x<pw;x++){
+        const vi=Math.min(SEMB_NV-1,Math.floor(x/pw*SEMB_NV));
+        const s=Math.max(0,Math.min(1,semb[ai*SEMB_NV+vi]/sembMax));
+        // dark -> blue -> orange -> white heat ramp
+        const r=Math.round(255*Math.min(1,Math.max(0,s*2.2-0.5)));
+        const g=Math.round(255*Math.min(1,Math.max(0,s*1.9-0.75)));
+        const b=Math.round(255*Math.min(1,Math.max(0,s*1.6)) *
+                          (s<0.45?1:Math.max(0,1.6-2*s)));
+        const o=(y*pw+x)*4;
+        d[o]=r; d[o+1]=g; d[o+2]=b; d[o+3]=255;
+      }
+    }
+    sc.putImageData(sembImg,L,T);
+  }
+  // axes
+  sc.fillStyle='#8a949f'; sc.font='10px ui-sans-serif,sans-serif';
+  for(let s=0;s<=tmax+1e-6;s+=0.2){
+    const y=T+(s/tmax)*ph;
+    sc.fillText(s.toFixed(1),4,y+3);
+  }
+  sc.fillText(sembVmin+'',L,H-14);
+  const ft=sembVmax+' m/s';
+  sc.fillText(ft,W-S_R-sc.measureText(ft).width,H-14);
+
+  // Model RMS is an educational reference and never overwrites manual picks.
+  if(selectedCmpIndex!==null){
+    const midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize;
+    sc.strokeStyle='#ffc857';sc.lineWidth=1.25;sc.setLineDash([5,3]);sc.beginPath();
+    for(let y=0;y<=ph;y++){const t0=y/ph*tmax,v=modelVAt(t0,midpointX),x=L+(v-sembVmin)/(sembVmax-sembVmin)*pw;y?sc.lineTo(x,T+y):sc.moveTo(x,T+y);}sc.stroke();sc.setLineDash([]);
+    sc.fillStyle='#ffc857';sc.fillText('Model RMS',L+4,T+12);
+  }
+  // Active picked/constant/model velocity function.
+  if(picks.length||velocitySource!=='manual'){
+    sc.strokeStyle='#7dff9b'; sc.lineWidth=1.5;
+    sc.beginPath();
+    for(let y=0;y<=ph;y++){
+      const t0=(y/ph)*tmax;
+      const v=vAt(t0);
+      const x=L+((v-sembVmin)/(sembVmax-sembVmin))*pw;
+      y?sc.lineTo(x,T+y):sc.moveTo(x,T+y);
+    }
+    sc.stroke();
+    picks.forEach(p=>{
+      const x=L+((p.v-sembVmin)/(sembVmax-sembVmin))*pw;
+      const y=T+(p.t0/tmax)*ph;
+      sc.fillStyle='#7dff9b'; sc.beginPath(); sc.arc(x,y,4,0,7); sc.fill();
+      sc.strokeStyle='#06121f'; sc.lineWidth=1; sc.stroke();
+    });
+  } else {
+    // constant-velocity line when nothing is picked
+    const x=L+((vnmo-sembVmin)/(sembVmax-sembVmin))*pw;
+    sc.strokeStyle='rgba(125,255,155,.5)'; sc.lineWidth=1.5;
+    sc.setLineDash([4,4]);
+    sc.beginPath(); sc.moveTo(x,T); sc.lineTo(x,T+ph); sc.stroke();
+    sc.setLineDash([]);
+  }
+}
+
+function refreshPickList(){
+  const el=document.getElementById('pickList');
+  if(!picks.length){ el.textContent=''; return; }
+  el.textContent='Picks: '+picks.map(p=>`${p.t0.toFixed(2)}s→${Math.round(p.v)}`).join(', ');
+}
+
+/* picking interaction */
+sembCan.addEventListener('click',e=>{
+  if(!semb) return;
+  const b=sembCan.getBoundingClientRect();
+  const {L,T,pw,ph}=sembGeom();
+  const px=(e.clientX-b.left)*(sembCan.width/b.width)-L;
+  const py=(e.clientY-b.top)*(sembCan.height/b.height)-T;
+  if(px<0||px>pw||py<0||py>ph) return;
+  const t0=(py/ph)*tmax;
+  const v=sembVmin+(px/pw)*(sembVmax-sembVmin);
+  if(e.shiftKey){
+    // delete nearest pick within a tolerance, measured in panel pixels
+    let bi=-1,bd=1e9;
+    picks.forEach((p,k)=>{
+      const dx=((p.v-sembVmin)/(sembVmax-sembVmin))*pw-px;
+      const dy=(p.t0/tmax)*ph-py;
+      const d=Math.hypot(dx,dy); if(d<bd){bd=d;bi=k;}
+    });
+    if(bi>=0&&bd<14) picks.splice(bi,1);
+  } else {
+    picks.push({t0,v});
+    picks.sort((a,b)=>a.t0-b.t0);
+    velocitySource='manual';
+    const manualRadio=document.querySelector('input[name="velocitySource"][value="manual"]');
+    if(manualRadio) manualRadio.checked=true;
+  }
+  refreshPickList(); drawNmo(); updateFlow();
+});
+const rawCtx=document.getElementById('nmoRaw').getContext('2d');
+const corCtx=document.getElementById('nmoCor').getContext('2d');
+const stkCtx=document.getElementById('nmoStk').getContext('2d');
+
+function drawNmo(){
+  const records=selectedCmpTraces();
+  document.getElementById('nmoCmpTitle').textContent=selectedCmpIndex===null?'No CMP selected':
+    `CMP ${selectedCmpIndex} · ${(cmpOrigin+selectedCmpIndex*cmpBinSize).toFixed(0)} m · fold ${records.length}`;
+  drawNmoCmpScheme();
+  if(!records.length){
+    [document.getElementById('nmoRaw'),document.getElementById('nmoCor'),document.getElementById('nmoStk')].forEach(cv=>drawTraceGather(cv,[],{empty:'Build and select a CMP'}));
+    sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);return;
+  }
+  ensureSemblance();drawSemb();
+  const result=nmoTraces(),stack=stackOf(result),midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,displayAmax=robustGatherAmplitude(records),activeVelocity=vAt(selectedHyperbolaT0,midpointX);
+  const seismicDisplay={axis:'offset',suppressCmpHighlight:true,variableDensity:nmoDensity,densityColor:true,amax:displayAmax,displayGain:nmoDisplayGain,clipTraces:true,positiveFill:false,lineWidth:1.2};
+  const exactCurve=showExactMoveout&&!modelHasLateralVariation()?record=>exactModelMoveoutTime(selectedHyperbolaT0,record.sourceReceiverOffset,midpointX):null;
+  drawTraceGather(document.getElementById('nmoRaw'),records,{...seismicDisplay,traceColor:'#9de4ff',hyperbola:{t0:selectedHyperbolaT0,velocity:activeVelocity},referenceCurve:exactCurve});
+  drawTraceGather(document.getElementById('nmoCor'),result.correctedRecords,{...seismicDisplay,traceColor:'#9effc5',valid:result.valid,title:'signed offset · muted shaded'});
+  const base=records[0],stackRecord=stack?{...base,shotId:0,receiverId:0,sourceReceiverOffset:0,samples:stack.samples,nt:stack.nt,dt:stack.dt}:null;
+  drawTraceGather(document.getElementById('nmoStk'),stackRecord?[stackRecord]:[],{axis:'offset',title:'stack',suppressCmpHighlight:true,amax:stackRecord?robustGatherAmplitude([stackRecord]):1,displayGain:Math.max(1,nmoDisplayGain*.8),clipTraces:true,traceColor:'#ffffff',fillColor:'rgba(127,211,255,.28)',lineWidth:1.5});
+  const residual=hyperbolaResidualStats(records,selectedHyperbolaT0,activeVelocity),nearest=Math.min(...records.map(r=>Math.abs(r.sourceReceiverOffset))),hasZero=nearest<1e-6;
+  const snap=hyperbolaSnapInfo?` · snap ${hyperbolaSnapInfo.delta>=0?'+':''}${(hyperbolaSnapInfo.delta*1000).toFixed(0)} ms`:'';
+  const residualText=residual?` · local residual RMS ${(residual.rms*1000).toFixed(0)} ms, bias ${residual.bias>=0?'+':''}${(residual.bias*1000).toFixed(0)} ms (${residual.count} traces)`:'';
+  const exactText=!showExactMoveout?'gold model curve off':modelHasLateralVariation()?'gold exact curve unavailable for laterally varying interfaces':'gold = exact layered-model reference';
+  document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span>`;
+  document.getElementById('nmoInfo').textContent=(stretchLimit===null?'Stretch mute is OFF.':`Muted because NMO stretch > ${Math.round(stretchLimit*100)}%; shaded samples are invalid and excluded from live fold.`)+
+    (modelHasLateralVariation()?' Model RMS is only a teaching reference for laterally varying reflectors; DMO/migration would be required.':'');
+}
+
+document.getElementById('nmoRaw').addEventListener('click',e=>{
+  const cv=e.currentTarget,b=cv.getBoundingClientRect(),y=(e.clientY-b.top)*cv.height/b.height;
+  const clickedT0=Math.max(0,Math.min(tmax,(y-24)/(cv.height-49)*tmax));
+  hyperbolaSnapInfo=snapHyperbolaT0(clickedT0,selectedCmpTraces());selectedHyperbolaT0=hyperbolaSnapInfo.t0;
+  const list=cv._traceRecords||[],x=(e.clientX-b.left)*cv.width/b.width,k=Math.max(0,Math.min(list.length-1,Math.floor((x-44)/(cv.width-54)*list.length)));
+  if(list[k])inspectTrace(list[k]);drawNmo();
+});
+/* ---------------- loop ---------------- */
+function resetPropagationPerformance(now=performance.now()){
+  perfStart=now;perfSteps=0;lastStatusPaint=0;lastWavefieldPaint=0;lastGatherPaint=0;
+  solverClock=now;solverCredit=0;
+}
+
+function measuredPropagationSpeed(now=performance.now()){
+  const elapsed=Math.max(1,now-perfStart);
+  return nt>0?perfSteps*4000/(elapsed*nt):0;
+}
+
+function updatePropagationReadout(now,force=false){
+  if(!force&&now-lastStatusPaint<100)return false;
+  lastStatusPaint=now;const actual=measuredPropagationSpeed(now),limited=actual<simulationSpeed*.82&&now-perfStart>750;
+  document.getElementById('speedPerf').textContent=`Measured ${actual.toFixed(1)}× · target ${simulationSpeed}×${limited?' · CPU limited':''}. Solver dt and recorded traces are unchanged.`;
+  return true;
+}
+
+function scheduleSolverPump(delay=0){
+  if(!running||solverTimer!==null)return;
+  if(simulationSpeed>=4){solverTimer=-1;solverChannel.port2.postMessage(0);}
+  else solverTimer=setTimeout(()=>{solverTimer=null;solverPump();},delay);
+}
+solverChannel.port1.onmessage=()=>{solverTimer=null;solverPump();};
+
+function cancelAcquisitionNow(){
+  running=false;paused=false;cancelRequested=false;acquisitionQueue=[];activeShotId=null;solverCredit=0;
+  document.getElementById('pauseAcq').textContent='Pause';
+  document.getElementById('stat').textContent='acquisition cancelled';
+  buildCmpBins(false);refreshShotGallery();refreshReceiverControls();updateFlow();render();
+}
+
+function finishCurrentShot(now){
+  finalizeShot();queueIndex++;
+  if(queueIndex<acquisitionQueue.length){initializeShotSimulation(acquisitionQueue[queueIndex]);return true;}
+  const averageSpeed=measuredPropagationSpeed(now);
+  running=false;activeShotId=null;solverCredit=0;document.getElementById('acqProgress').style.width='100%';
+  document.getElementById('pauseAcq').textContent='Pause';
+  document.getElementById('stat').textContent=`Acquisition complete · ${shotRecords.length} shot gather${shotRecords.length===1?'':'s'} stored · measured ${averageSpeed.toFixed(1)}×`;
+  document.getElementById('activeShotInfo').textContent='All queued shots complete. Select a card, receiver, or build CMP gathers.';
+  document.getElementById('speedPerf').textContent=`Measured ${averageSpeed.toFixed(1)}× average · target ${simulationSpeed}×. Solver dt and recorded traces were unchanged.`;
+  buildCmpBins(false);refreshShotGallery();refreshReceiverControls();updateFlow();render();return false;
+}
+
+/* Numerical work runs on its own short, yielding timer slices. The earlier
+   requestAnimationFrame batching made solver throughput depend on how long a
+   repaint took and on missed display frames. Step credit enforces the target
+   rate when affordable; 8x/16x use longer slices and naturally settle at the
+   measured CPU ceiling without freezing controls. */
+function solverPump(){
+  if(!running)return;
+  if(cancelRequested){cancelAcquisitionNow();return;}
+  const start=performance.now();
+  if(paused){solverClock=start;solverCredit=0;scheduleSolverPump(24);return;}
+  const elapsed=Math.min(250,Math.max(0,start-solverClock));solverClock=start;
+  const desiredStepsPerMs=nt/4000*simulationSpeed;
+  solverCredit=Math.min(nt,solverCredit+elapsed*desiredStepsPerMs);
+  const budgetMs=simulationSpeed<=1?5:simulationSpeed<=2?8:simulationSpeed<=4?24:simulationSpeed<=8?48:80;
+  while(running&&!paused&&!cancelRequested&&solverCredit>=1&&performance.now()-start<budgetMs){
+    step();perfSteps++;solverCredit--;
+    if(it>=nt&&!finishCurrentShot(performance.now()))break;
+  }
+  if(!running)return;
+  if(cancelRequested){cancelAcquisitionNow();return;}
+  const wait=solverCredit>=1?0:Math.max(0,Math.min(12,(1-solverCredit)/Math.max(1e-9,desiredStepsPerMs)));
+  scheduleSolverPump(wait);
+}
+
+function frame(now=performance.now()){
+  if(running){
+    if(!paused){
+      const updateStatus=updatePropagationReadout(now),shot=acquisitionQueue[queueIndex];
+      if(shot&&updateStatus){
+        const pct=100*(queueIndex+it/Math.max(1,nt))/Math.max(1,acquisitionQueue.length);
+        document.getElementById('stat').textContent=`Shot ${queueIndex+1} / ${acquisitionQueue.length} · x = ${(shot.i*DX).toFixed(0)} m · t = ${(it*dt).toFixed(3)} s · ${pct.toFixed(0)}% · target ${simulationSpeed}× · measured ${measuredPropagationSpeed(now).toFixed(1)}×`;
+        document.getElementById('acqProgress').style.width=`${pct}%`;document.querySelector('.progress').setAttribute('aria-valuenow',Math.round(pct));
+      }
+      renderAcquisitionLive(now);
+    }else if(now-lastStatusPaint>=150){lastStatusPaint=now;document.getElementById('stat').textContent=`Paused · Shot ${queueIndex+1} / ${acquisitionQueue.length} · t = ${(it*dt).toFixed(3)} s`;}
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ---------------- sorting, lineage and final section ---------------- */
+function selectCmp(index,showStage=null){
+  if(!cmpBins.has(index))return;
+  selectedCmpIndex=index;selectedTraceKey=null;hyperbolaSnapInfo=null;sembDirty=true;
+  drawCmpViews();drawAcquisitionViews();refreshShotGallery();render();
+  if(showStage)setStage(showStage);
+}
+
+function moveCmp(direction,stage=null){
+  const keys=[...cmpBins.keys()].sort((a,b)=>a-b);if(!keys.length)return;
+  let at=Math.max(0,keys.indexOf(selectedCmpIndex));at=Math.max(0,Math.min(keys.length-1,at+direction));selectCmp(keys[at],stage);
+}
+
+function drawFoldStrip(){
+  drawCmpFoldCanvas(document.getElementById('foldCanvas'),{compact:true});
+}
+
+function drawCmpFoldCanvas(cv,{compact=false}={}){
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,L=compact?45:64,R=18,T=compact?22:42,B=compact?28:34;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  ctx.font=`${compact?10:12}px ui-sans-serif,sans-serif`;
+  if(!keys.length){ctx.fillStyle='#8a949f';ctx.fillText('No CMP bins yet — acquire shots and build CMP gathers first.',L,T+20);cv._cmpRange=null;return;}
+  const min=keys[0],max=keys[keys.length-1],count=max-min+1,pw=W-L-R,ph=H-T-B,maxFold=Math.max(1,...keys.map(k=>cmpBins.get(k).length));cv._cmpRange={min,max,count,L,R};
+  ctx.strokeStyle='#232a33';ctx.lineWidth=1;
+  for(let q=0;q<=4;q++){const y=T+ph*(1-q/4);ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(W-R,y);ctx.stroke();if(!compact){ctx.fillStyle='#65717e';ctx.fillText(Math.round(maxFold*q/4).toString(),8,y+4);}}
+  for(let i=0;i<count;i++){
+    const k=min+i,fold=cmpBins.get(k)?.length||0,x=L+i/count*pw,w=Math.max(1,pw/count),h=fold/maxFold*ph;
+    ctx.fillStyle=k===selectedCmpIndex?'#ffc857':fold?'#4da3ff':'#252c35';ctx.fillRect(x,T+ph-h,Math.max(1,w-1),h);
+    if(k===selectedCmpIndex){ctx.strokeStyle='#ffe4a2';ctx.lineWidth=2;ctx.strokeRect(x+.5,T+ph-h+.5,Math.max(1,w-2),Math.max(1,h-1));ctx.strokeStyle='#232a33';ctx.lineWidth=1;}
+  }
+  ctx.fillStyle='#8a949f';ctx.fillText(`Fold 0–${maxFold}`,compact?3:L,compact?13:18);
+  const firstLabel=`${(cmpOrigin+min*cmpBinSize).toFixed(0)} m`,lastLabel=`${(cmpOrigin+max*cmpBinSize).toFixed(0)} m`,middleLabel=`${(cmpOrigin+(min+max)/2*cmpBinSize).toFixed(0)} m`;
+  ctx.fillText(firstLabel,L,H-9);ctx.fillText(lastLabel,W-R-ctx.measureText(lastLabel).width,H-9);ctx.fillText(middleLabel,L+pw/2-ctx.measureText(middleLabel).width/2,H-9);
+  ctx.fillText('CMP midpoint →',L+pw/2-ctx.measureText('CMP midpoint →').width/2,compact?13:18);
+  if(!compact&&selectedCmpIndex!==null&&cmpBins.has(selectedCmpIndex)){
+    const center=cmpOrigin+selectedCmpIndex*cmpBinSize,fold=cmpBins.get(selectedCmpIndex).length,label=`Selected CMP ${selectedCmpIndex} · ${center.toFixed(0)} m · fold ${fold}`;
+    ctx.fillStyle='#ffc857';ctx.font='600 13px ui-sans-serif,sans-serif';const x=L+(selectedCmpIndex-min+.5)/count*pw;
+    ctx.fillText(label,Math.max(L,Math.min(W-R-ctx.measureText(label).width,x-ctx.measureText(label).width/2)),36);
+  }
+}
+
+function drawNmoCmpScheme(){
+  const cv=document.getElementById('nmoCmpScheme');if(!cv)return;drawCmpFoldCanvas(cv);
+  const summary=document.getElementById('nmoCmpSelectorSummary'),keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  if(!keys.length){summary.textContent='Build CMP gathers to populate this scheme.';return;}
+  if(selectedCmpIndex===null||!cmpBins.has(selectedCmpIndex)){summary.textContent=`${keys.length} CMP gathers available — click a bar to select one.`;return;}
+  const center=cmpOrigin+selectedCmpIndex*cmpBinSize,fold=cmpBins.get(selectedCmpIndex).length;
+  summary.textContent=`${keys.length} gathers · selected midpoint ${center.toFixed(0)} m · fold ${fold}`;
+}
+
+function cmpIndexFromCanvasEvent(cv,e){
+  const range=cv._cmpRange;if(!range)return null;const b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*cv.width/b.width,pw=cv.width-range.L-range.R;
+  if(x<range.L||x>cv.width-range.R)return null;return range.min+Math.max(0,Math.min(range.count-1,Math.floor((x-range.L)/pw*range.count)));
+}
+
+function installCmpCanvasPicker(cv,stage=null){
+  cv.addEventListener('click',e=>{const index=cmpIndexFromCanvasEvent(cv,e);if(index!==null&&cmpBins.has(index))selectCmp(index,stage);});
+  cv.addEventListener('mousemove',e=>{const index=cmpIndexFromCanvasEvent(cv,e),records=index===null?null:cmpBins.get(index);cv.title=records?`CMP ${index} · midpoint ${(cmpOrigin+index*cmpBinSize).toFixed(0)} m · fold ${records.length} · click to select`:'No acquired traces in this bin';});
+  cv.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();moveCmp(e.key==='ArrowLeft'?-1:1,stage);}});
+}
+
+function drawGeometryStrip(){
+  const cv=document.getElementById('geometryStrip'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const plotL=165,plotR=W-170,pw=plotR-plotL,records=selectedCmpTraces(),modelWidth=MX*DX;
+  const xMap=x=>plotL+x/modelWidth*pw;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);ctx.font='11px ui-sans-serif,sans-serif';
+
+  const drawStar=(x,y,r=5)=>{ctx.beginPath();for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?r*.45:r;k?ctx.lineTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr):ctx.moveTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);}ctx.closePath();ctx.fill();};
+  const drawReceiver=(x,y,r=5)=>{ctx.beginPath();ctx.moveTo(x,y+r);ctx.lineTo(x-r,y-r*.7);ctx.lineTo(x+r,y-r*.7);ctx.closePath();ctx.fill();};
+
+  // The selected bin is a band, not a single exact midpoint. It remains behind
+  // the full survey and every contributing trace row so the sorting rule reads
+  // consistently from overview to gather membership.
+  if(selectedCmpIndex!==null){
+    const center=cmpOrigin+selectedCmpIndex*cmpBinSize,x0=xMap(center-cmpBinSize/2),x1=xMap(center+cmpBinSize/2);
+    ctx.fillStyle='rgba(255,200,87,.13)';ctx.fillRect(x0,10,Math.max(2,x1-x0),H-42);
+    ctx.strokeStyle='#ffc857';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(xMap(center),10);ctx.lineTo(xMap(center),H-32);ctx.stroke();
+    ctx.fillStyle='#ffc857';ctx.fillText(`CMP ${selectedCmpIndex} · ${center.toFixed(0)} m`,Math.min(plotR-105,xMap(center)+6),17);
+  }
+
+  // Planned/acquired survey overview.
+  ctx.fillStyle='#8a949f';ctx.fillText('SHOT LINE',10,39);ctx.fillText('RECEIVER LINE',10,80);
+  ctx.strokeStyle='#3a444f';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(plotL,35);ctx.lineTo(plotR,35);ctx.moveTo(plotL,76);ctx.lineTo(plotR,76);ctx.stroke();
+  shotPositions.forEach((shot,shotIndex)=>{
+    const x=xMap(shot.i*DX),complete=shotRecords.some(record=>record.id===shot.id);ctx.fillStyle=complete?'#ff6b6b':'rgba(255,107,107,.45)';drawStar(x,35,6);
+    if(shotIndex===0||shotIndex===shotPositions.length-1||shotIndex%2===0){ctx.fillStyle=complete?'#d5dae1':'#8a949f';ctx.textAlign='center';ctx.fillText(`S${shot.id}`,x,25);ctx.textAlign='left';}
+  });
+  recs.forEach((receiver,k)=>{
+    const x=xMap(receiver.i*DX);ctx.fillStyle='#7fd3ff';drawReceiver(x,76,4);
+    if(k===0||k===recs.length-1||k%8===7){ctx.fillStyle='#8a949f';ctx.textAlign='center';ctx.fillText(`R${receiver.id}`,x,94);ctx.textAlign='left';}
+  });
+  ctx.strokeStyle='#56616d';ctx.beginPath();ctx.moveTo(plotL,112);ctx.lineTo(plotR,112);ctx.stroke();ctx.fillStyle='#8a949f';
+  for(let x=0;x<=modelWidth;x+=200){const px=xMap(x);ctx.beginPath();ctx.moveTo(px,108);ctx.lineTo(px,116);ctx.stroke();ctx.textAlign='center';ctx.fillText(`${x}`,px,128);}ctx.textAlign='left';ctx.fillText('surface x (m)',plotR+16,116);
+
+  ctx.fillStyle='#d5dae1';ctx.fillText('CONTRIBUTING TRACE',10,153);ctx.fillText('SOURCE — MIDPOINT — RECEIVER',plotL,153);ctx.fillText('TRACE METADATA',plotR+16,153);
+  ctx.strokeStyle='#2a313b';ctx.beginPath();ctx.moveTo(10,160);ctx.lineTo(W-12,160);ctx.stroke();
+  if(!records.length){ctx.fillStyle='#8a949f';ctx.fillText('Acquire the survey and select a non-empty CMP bin to see its trace membership.',plotL,192);return;}
+
+  const maxRows=10,rowH=19;
+  let shown=records.length<=maxRows?records.slice():Array.from({length:maxRows},(_,k)=>records[Math.round(k*(records.length-1)/(maxRows-1))]);
+  const selectedRecord=records.find(record=>selectedTraceKey===traceKey(record));
+  if(selectedRecord&&!shown.includes(selectedRecord)){shown[shown.length-1]=selectedRecord;shown.sort((a,b)=>a.sourceReceiverOffset-b.sourceReceiverOffset);}
+  shown.forEach((record,k)=>{
+    const y=178+k*rowH,selected=selectedTraceKey===traceKey(record),sx=xMap(record.sourceX),rx=xMap(record.receiverX),mx=xMap(record.midpointX);
+    if(selected){ctx.fillStyle='rgba(255,200,87,.13)';ctx.fillRect(6,y-rowH/2,W-18,rowH);}
+    ctx.fillStyle=selected?'#ffc857':'#d5dae1';ctx.fillText(`S${record.shotId} → R${record.receiverId}`,16,y+3);
+    ctx.strokeStyle=selected?'#ffc857':'#65717e';ctx.lineWidth=selected?2:1;ctx.beginPath();ctx.moveTo(sx,y);ctx.lineTo(rx,y);ctx.stroke();
+    ctx.fillStyle='#ff6b6b';drawStar(sx,y,5);ctx.fillStyle='#7fd3ff';drawReceiver(rx,y,4.5);ctx.fillStyle='#ffc857';ctx.beginPath();ctx.arc(mx,y,4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=selected?'#ffc857':'#8a949f';const sign=record.sourceReceiverOffset>=0?'+':'';ctx.fillText(`m ${record.midpointX.toFixed(1)} m · x ${sign}${record.sourceReceiverOffset.toFixed(0)} m`,plotR+16,y+3);
+  });
+  ctx.fillStyle='#8a949f';ctx.fillText(records.length>maxRows?`Showing ${maxRows} of ${records.length} contributing traces; all ${records.length} appear in the CMP gather.`:`All ${records.length} contributing trace${records.length===1?'':'s'} shown.`,16,H-12);
+}
+
+function drawCmpViews(){
+  drawFoldStrip();const records=selectedCmpTraces();
+  drawTraceGather(document.getElementById('cmpGather'),records,{axis:'offset',empty:'Build CMP gathers to assemble midpoint-sorted traces',suppressCmpHighlight:true,variableDensity:true,amax:records.length?robustGatherAmplitude(records):1,displayGain:2,clipTraces:true,positiveFill:false,lineWidth:1.25});
+  drawGeometryStrip();
+  const info=document.getElementById('cmpInfo'),summary=document.getElementById('surveySummary');
+  const shotXs=shotPositions.map(s=>s.i*DX),receiverXs=recs.map(r=>r.i*DX),surveyText=shotXs.length&&receiverXs.length?`${shotRecords.length}/${shotXs.length} shots acquired across ${Math.min(...shotXs).toFixed(0)}–${Math.max(...shotXs).toFixed(0)} m; ${receiverXs.length} receivers span ${Math.min(...receiverXs).toFixed(0)}–${Math.max(...receiverXs).toFixed(0)} m.`:'Add both shots and receivers.';
+  if(selectedCmpIndex===null){info.textContent='Acquire at least one shot, then build CMP gathers.';summary.textContent=`${surveyText} The shot line is wider and the receiver line is denser.`;return;}
+  const center=cmpOrigin+selectedCmpIndex*cmpBinSize,offsets=records.map(r=>r.sourceReceiverOffset);
+  const uniqueOffsets=[...new Set(offsets)].sort((a,b)=>a-b),offsetGaps=uniqueOffsets.slice(1).map((value,k)=>value-uniqueOffsets[k]).sort((a,b)=>a-b);
+  const medianGap=offsetGaps.length?offsetGaps[Math.floor(offsetGaps.length/2)]:0,maxGap=offsetGaps.length?offsetGaps[offsetGaps.length-1]:0;
+  info.textContent=`Selected CMP ${selectedCmpIndex} · centre ${center.toFixed(1)} m · fold ${records.length} · midpoint range ${(center-cmpBinSize/2).toFixed(1)}–${(center+cmpBinSize/2).toFixed(1)} m · offset range ${Math.min(...offsets).toFixed(0)} to ${Math.max(...offsets).toFixed(0)} m · offset sampling median ${medianGap.toFixed(0)} m, largest gap ${maxGap.toFixed(0)} m`;
+  summary.textContent=`${surveyText} Gold band = ${center-cmpBinSize/2}–${center+cmpBinSize/2} m. Every row below is one acquired trace whose surface midpoint falls in that bin; offset gaps are reported above.`;
+}
+
+installCmpCanvasPicker(document.getElementById('foldCanvas'));
+installCmpCanvasPicker(document.getElementById('nmoCmpScheme'),'nmo');
+installTracePicker(document.getElementById('acqGather'));
+installTracePicker(document.getElementById('receiverGather'));
+installTracePicker(document.getElementById('cmpGather'));
+
+function processAllCMPs(){
+  if(!cmpBins.size){document.getElementById('finalInfo').textContent='Build CMP gathers first.';return;}
+  stopFinalFlip(true);finalView='stack';updateFinalViewControls();
+  const mode=document.getElementById('allVelocity').value,minFold=+document.getElementById('minFold').value;
+  finalStacks=new Map();const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  keys.forEach(index=>{
+    const records=cmpBins.get(index);if(records.length<minFold)return;
+    const center=cmpOrigin+index*cmpBinSize;
+    const velocityFunction=mode==='model'?(t0)=>modelVAt(t0,center):(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
+    const result=applyNMO(records,velocityFunction,stretchLimit),stack=stackOf(result);
+    finalStacks.set(index,{index,center,fold:records.length,stack});
+  });
+  finalRange={min:keys[0],max:keys[keys.length-1],minFold,mode};drawFinalSection();updateFlow();
+  const velocitySummary=mode==='model'?'time-varying Model RMS at each midpoint':(picks.length?'reference CMP picked velocity':'constant velocity fallback (no reference picks)');
+  document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}. Blank columns are not interpolated.`;
+}
+
+let finalImg=null;
+
+function finalTimeGainFactor(t,mode){
+  const u=Math.max(0,Math.min(1,t/Math.max(.05,tmax)));
+  if(mode==='sqrt')return .50+2.50*Math.sqrt(u);
+  if(mode==='linear')return .35+3.65*u;
+  return 1;
+}
+
+/* Display-only normalization for the final stack. A conventional global peak
+   is usually the shallow direct/source event, which hides later reflections.
+   A high percentile rejects that isolated peak; the user gain and time gain
+   are applied only while drawing and never alter the processed stack arrays. */
+function finalDisplayProfile(stacks){
+  const mode=document.getElementById('finalTimeGain').value,gain=+document.getElementById('finalGain').value||1,values=[];
+  const valueAt=(value,a,localNt)=>value*finalTimeGainFactor(a/Math.max(1,localNt-1)*tmax,mode);
+  stacks.forEach(item=>{
+    const tr=item.stack.samples,stride=Math.max(1,Math.floor(tr.length/500));
+    for(let a=0;a<tr.length;a+=stride){const v=Math.abs(valueAt(tr[a],a,tr.length));if(v>1e-12)values.push(v);}
+  });
+  values.sort((a,b)=>a-b);
+  const clip=values.length?Math.max(1e-9,values[Math.floor((values.length-1)*.985)]):1e-9;
+  return{mode,gain,clip,valueAt};
+}
+
+/* Interface times use vertical two-way travel from the acquisition datum.
+   The causal source-wavelet delay is included so a flat model boundary lines
+   up with the peak time convention used by the displayed synthetic traces. */
+function modelTimeBoundariesAt(midpointX){
+  const modelI=Math.max(0,Math.min(MX-1,Math.round(midpointX/DX))),times=[0],delay=sourceWaveletDelay();
+  let depth=SURF*DX,physicalT=0;
+  for(let k=1;k<layers.length;k++){
+    const nextDepth=Math.max(depth,modelInterfaceDepth(k,modelI));
+    physicalT+=2*(nextDepth-depth)/layers[k-1].vp;
+    times.push(delay+physicalT);depth=nextDepth;
+  }
+  return times;
+}
+
+function rgbFromHex(hex){const n=parseInt(hex.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255];}
+
+function drawFinalModelReference(ctx,L,T,pw,ph,min,max){
+  const image=ctx.createImageData(pw,ph),pixels=image.data,minX=cmpOrigin+min*cmpBinSize,maxX=cmpOrigin+max*cmpBinSize;
+  for(let x=0;x<pw;x++){
+    const midpointX=minX+x/Math.max(1,pw-1)*(maxX-minX),times=modelTimeBoundariesAt(midpointX);
+    for(let y=0;y<ph;y++){
+      const time=y/Math.max(1,ph-1)*tmax;let layerIndex=0;
+      while(layerIndex+1<times.length&&time>=times[layerIndex+1])layerIndex++;
+      const [r,g,b]=rgbFromHex(PAL[layerIndex%PAL.length]),o=(y*pw+x)*4;
+      pixels[o]=Math.round(r*.88);pixels[o+1]=Math.round(g*.88);pixels[o+2]=Math.round(b*.88);pixels[o+3]=255;
+    }
+  }
+  ctx.putImageData(image,L,T);
+  for(let k=1;k<layers.length;k++){
+    const z1=layers[k-1].vp*layers[k-1].rho,z2=layers[k].vp*layers[k].rho,rc=(z2-z1)/(z2+z1);
+    const traceBoundary=dy=>{ctx.beginPath();for(let x=0;x<=pw;x+=2){const midpointX=minX+x/Math.max(1,pw)*(maxX-minX),time=modelTimeBoundariesAt(midpointX)[k],y=T+time/tmax*ph+dy;x?ctx.lineTo(L+x,y):ctx.moveTo(L+x,y);}ctx.stroke();};
+    ctx.strokeStyle='rgba(0,0,0,.72)';ctx.lineWidth=2.2+Math.min(3,Math.abs(rc)*9);traceBoundary(2);
+    ctx.strokeStyle=`rgba(255,225,157,${Math.min(.95,.55+Math.abs(rc)*1.4)})`;ctx.lineWidth=1.2+Math.min(2.5,Math.abs(rc)*7);traceBoundary(0);
+  }
+  ctx.fillStyle='rgba(7,12,18,.72)';ctx.fillRect(L+8,T+8,255,36);
+  ctx.fillStyle='#f0d38a';ctx.font='11px ui-sans-serif';ctx.fillText('ORIGINAL MODEL · VERTICAL TWT',L+16,T+23);
+  ctx.fillStyle='#b8c2cc';ctx.font='10px ui-sans-serif';ctx.fillText(`includes ${(sourceWaveletDelay()*1000).toFixed(0)} ms causal-wavelet delay`,L+16,T+38);
+}
+
+function updateFinalViewControls(){
+  const stackView=finalView==='stack',stackButton=document.getElementById('finalViewStack'),modelButton=document.getElementById('finalViewModel');
+  stackButton.classList.toggle('on',stackView);modelButton.classList.toggle('on',!stackView);
+  stackButton.setAttribute('aria-pressed',String(stackView));modelButton.setAttribute('aria-pressed',String(!stackView));
+  document.getElementById('finalTitle').innerHTML=stackView?'CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span>':'ORIGINAL MODEL — VERTICAL TIME REFERENCE <span class="view-badge">NOT MIGRATED</span>';
+  document.getElementById('finalSection').setAttribute('aria-label',stackView?'Unmigrated two-dimensional CMP stack':'Original velocity model converted to vertical two-way time');
+}
+
+function stopFinalFlip(uncheck=true){
+  if(finalFlipTimer){clearInterval(finalFlipTimer);finalFlipTimer=null;}
+  if(uncheck){const checkbox=document.getElementById('finalFlip');if(checkbox)checkbox.checked=false;}
+}
+
+function setFinalComparisonView(view,fromFlip=false){
+  if(!fromFlip)stopFinalFlip(true);
+  finalView=view==='model'?'model':'stack';updateFinalViewControls();drawFinalSection();
+}
+
+function setFinalFlip(enabled){
+  stopFinalFlip(false);
+  if(!enabled)return;
+  finalView='stack';updateFinalViewControls();drawFinalSection();
+  finalFlipTimer=setInterval(()=>setFinalComparisonView(finalView==='stack'?'model':'stack',true),950);
+}
+
+function potentialSurveyCmpRange(){
+  if(!shotPositions.length||!recs.length)return null;
+  const shotX=shotPositions.map(s=>s.i*DX),receiverX=recs.map(r=>r.i*DX);
+  const minMidpoint=(Math.min(...shotX)+Math.min(...receiverX))/2,maxMidpoint=(Math.max(...shotX)+Math.max(...receiverX))/2;
+  return{min:cmpIndexForMidpoint(minMidpoint),max:cmpIndexForMidpoint(maxMidpoint)};
+}
+
+function drawFinalSection(){
+  const cv=document.getElementById('finalSection'),ctx=cv.getContext('2d'),foldCv=document.getElementById('finalFold'),fc=foldCv.getContext('2d');
+  const W=cv.width,H=cv.height,L=48,R=12,T=28,B=28,pw=W-L-R,ph=H-T-B;
+  updateFinalViewControls();ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);fc.fillStyle='#0b0e12';fc.fillRect(0,0,foldCv.width,foldCv.height);
+  const cmpKeys=[...cmpBins.keys()].sort((a,b)=>a-b),range=finalRange||(finalView==='model'?(cmpKeys.length?{min:cmpKeys[0],max:cmpKeys.at(-1)}:potentialSurveyCmpRange()):null);
+  if(!range){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(finalView==='stack'?'NMO + Stack All CMPs to build the final unmigrated section.':'Build CMP gathers to establish the model-comparison midpoint range.',L,T+20);return;}
+  const {min,max}=range,count=max-min+1,stacks=[...finalStacks.values()],profile=finalDisplayProfile(stacks);
+  if(finalView==='model'){
+    drawFinalModelReference(ctx,L,T,pw,ph,min,max);
+    document.getElementById('finalDisplayInfo').textContent=`Vertical-time model reference at the acquisition datum, including the ${(sourceWaveletDelay()*1000).toFixed(0)} ms causal source-wavelet delay. It is a comparison reference—not a migrated image.`;
+  }else if(stacks.length){
+    if(!finalImg||finalImg.width!==pw||finalImg.height!==ph)finalImg=ctx.createImageData(pw,ph);const d=finalImg.data;
+    for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){
+      const index=min+Math.min(count-1,Math.floor(x/pw*count)),item=finalStacks.get(index);let g=8;
+      if(item){const a=Math.min(item.stack.nt-1,Math.floor(y/ph*item.stack.nt)),v=Math.max(-1,Math.min(1,profile.valueAt(item.stack.samples[a],a,item.stack.nt)/profile.clip*profile.gain));g=Math.round(v>=0?118+v*137:118+v*110);}
+      const o=(y*pw+x)*4;d[o]=d[o+1]=d[o+2]=g;d[o+3]=255;
+    }
+    ctx.putImageData(finalImg,L,T);
+    if(document.getElementById('finalWiggle').checked){
+      stacks.forEach(item=>{const col=item.index-min,x0=L+(col+.5)/count*pw,tr=item.stack.samples;ctx.strokeStyle='#8edbff';ctx.lineWidth=.9;ctx.beginPath();for(let a=0;a<tr.length;a++){const normalized=Math.max(-1,Math.min(1,profile.valueAt(tr[a],a,tr.length)/profile.clip*profile.gain)),x=x0+normalized*(pw/count)*.43,y=T+a/(tr.length-1)*ph;a?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();});
+    }
+    const gainName=profile.mode==='sqrt'?'√t':profile.mode==='linear'?'t':'no time';
+    document.getElementById('finalDisplayInfo').textContent=`Display only: robust P98.5 clip · ${gainName} compensation · ${profile.gain.toFixed(1)}× gain. Processed stack samples are unchanged.`;
+  }else{
+    ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText('NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);
+  }
+  ctx.strokeStyle='rgba(35,42,51,.75)';ctx.fillStyle='#a0abb6';ctx.font='10px ui-sans-serif';
+  for(let s=0;s<=tmax+1e-6;s+=.2){const y=T+s/tmax*ph;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();ctx.fillText(s.toFixed(1)+' s',3,y+3);}
+  ctx.fillStyle='#a0abb6';ctx.fillText(`${(cmpOrigin+min*cmpBinSize).toFixed(0)} m`,L,H-8);let right=`${(cmpOrigin+max*cmpBinSize).toFixed(0)} m`;ctx.fillText(right,W-R-ctx.measureText(right).width,H-8);ctx.fillText('CMP midpoint',L+pw/2-30,13);ctx.fillText('TWT',3,13);
+  const fL=L,fR=R,fT=12,fB=24,fh=foldCv.height-fT-fB,maxFold=Math.max(1,...[...cmpBins.values()].map(g=>g.length));
+  for(let i=0;i<count;i++){const index=min+i,fold=cmpBins.get(index)?.length||0,x=fL+i/count*pw,w=Math.max(1,pw/count),h=fold/maxFold*fh;fc.fillStyle=finalStacks.has(index)?'#4da3ff':'#343c46';fc.fillRect(x,fT+fh-h,Math.max(1,w-1),h);}
+  fc.fillStyle='#8a949f';fc.font='10px ui-sans-serif';fc.fillText(`Fold 0–${maxFold}`,3,10);fc.fillText(`${(cmpOrigin+min*cmpBinSize).toFixed(0)} m`,fL,foldCv.height-7);fc.fillText(right,foldCv.width-fR-fc.measureText(right).width,foldCv.height-7);
+}
+
+document.getElementById('finalSection').addEventListener('click',e=>{if(finalView!=='stack'||!finalRange)return;const cv=e.currentTarget,b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*cv.width/b.width,L=48,R=12,count=finalRange.max-finalRange.min+1,index=finalRange.min+Math.floor((x-L)/(cv.width-L-R)*count);if(cmpBins.has(index))selectCmp(index,'nmo');});
+
+function updateFlow(){
+  const states={flowShots:shotRecords.length?'done':'active',flowReceiver:shotRecords.length?'done':'',flowCmp:cmpBins.size?'done':'',flowVel:(picks.length||velocitySource==='model')?'done':'',flowNmo:selectedCmpIndex!==null?'active':'',flowStack:finalStacks.size?'done':''};
+  Object.entries(states).forEach(([id,c])=>{document.getElementById(id).className=c;});
+}
+
+/* ---------------- UI ---------------- */
+let tool='layer',currentStage='acquisition',selectedInterface=1,selectedLayerIndex=1,draggedKnee=null,pendingKneeContext=null;
+const hint=document.getElementById('modeHint');
+const HINTS={
+  layer:'Mode: Layer knees — drag a handle to reshape; right-click a boundary to add a knee',
+  src:'Mode: Add Shot — click the surface to add; shift-click near a shot to remove it before acquisition',
+  rec:'Mode: Receiver — click to add; shift-click near a receiver to remove it'
+};
+
+function modelPointer(e){const b=mCan.getBoundingClientRect();return{b,px:Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),pz:Math.max(.01,Math.min(.98,(e.clientY-b.top)/b.height))};}
+function nearestInterface(px,pz,b,maxPixels=14){
+  let best=null;for(let k=1;k<layers.length;k++){const z=ifaceZ(k,Math.round(px*(MX-1))),distance=Math.abs(z-pz)*b.height;if(distance<=maxPixels&&(!best||distance<best.distance))best={k,distance};}return best;
+}
+function nearestKnee(px,pz,b,maxPixels=13){
+  let best=null;for(let k=1;k<layers.length;k++)layers[k].knees.forEach((p,n)=>{const dx=(p.x-px)*b.width,dy=(p.z-pz)*b.height,distance=Math.hypot(dx,dy);if(distance<=maxPixels&&(!best||distance<best.distance))best={k,n,distance};});return best;
+}
+function interfaceCandidateValid(k,knees){
+  const xs=new Set(knees.map(p=>p.x));layers[k-1].knees.forEach(p=>xs.add(p.x));if(k+1<layers.length)layers[k+1].knees.forEach(p=>xs.add(p.x));
+  for(const x of xs){const z=interpolateKnees(knees,x),above=interpolateKnees(layers[k-1].knees,x),below=k+1<layers.length?interpolateKnees(layers[k+1].knees,x):1;if(z-above<MIN_LAYER_GAP||below-z<MIN_LAYER_GAP)return false;}return true;
+}
+function moveKnee(k,n,px,pz){
+  const source=layers[k].knees,old=source[n],left=n?source[n-1].x+.015:0,right=n+1<source.length?source[n+1].x-.015:1,target={x:n===0?0:n===source.length-1?1:Math.max(left,Math.min(right,px)),z:Math.max(.02,Math.min(.97,pz))};
+  const candidate=t=>source.map((p,i)=>i===n?{x:old.x+(target.x-old.x)*t,z:old.z+(target.z-old.z)*t}:{...p});
+  let trial=candidate(1);if(interfaceCandidateValid(k,trial)){layers[k].knees=trial;return;}
+  let lo=0,hi=1,best=candidate(0);for(let q=0;q<18;q++){const mid=(lo+hi)/2,test=candidate(mid);if(interfaceCandidateValid(k,test)){best=test;lo=mid;}else hi=mid;}layers[k].knees=best;
+}
+function insertKnee(k,x){
+  const knees=layers[k].knees;if(knees.some(p=>Math.abs(p.x-x)<.012)){document.getElementById('stat').textContent='A knee already exists very close to that position.';return false;}
+  knees.push({x,z:interpolateKnees(knees,x)});knees.sort((a,b)=>a.x-b.x);selectedInterface=k;selectedLayerIndex=k;return true;
+}
+
+const modelContext=document.getElementById('modelContext');
+function hideModelContext(){modelContext.classList.remove('on');pendingKneeContext=null;}
+mCan.addEventListener('contextmenu',e=>{
+  if(tool!=='layer')return;const p=modelPointer(e),hit=nearestInterface(p.px,p.pz,p.b);if(!hit)return;
+  e.preventDefault();if(!surveyChangeAllowed('Model changed'))return;selectedInterface=hit.k;selectedLayerIndex=hit.k;pendingKneeContext={k:hit.k,x:p.px};refreshLayerUI();
+  modelContext.style.left=Math.max(4,Math.min(p.b.width-155,e.clientX-p.b.left))+'px';modelContext.style.top=Math.max(4,Math.min(p.b.height-42,e.clientY-p.b.top))+'px';modelContext.classList.add('on');render();
+});
+document.getElementById('addKneeMenu').onclick=e=>{e.stopPropagation();if(!pendingKneeContext)return;if(insertKnee(pendingKneeContext.k,pendingKneeContext.x)){refreshLayerUI();setup();render();document.getElementById('stat').textContent=`Added knee to interface ${pendingKneeContext.k}; drag it to reshape the boundary.`;}hideModelContext();};
+document.addEventListener('mousedown',e=>{if(!modelContext.contains(e.target))hideModelContext();});
+
+mCan.addEventListener('mousedown',e=>{
+  if(e.button!==0||tool!=='layer')return;const p=modelPointer(e),hit=nearestKnee(p.px,p.pz,p.b);if(!hit)return;
+  if(!surveyChangeAllowed('Model changed'))return;e.preventDefault();selectedInterface=hit.k;selectedLayerIndex=hit.k;draggedKnee={k:hit.k,n:hit.n,moved:false};refreshLayerUI();render();
+});
+window.addEventListener('mousemove',e=>{
+  if(!draggedKnee)return;const p=modelPointer(e);moveKnee(draggedKnee.k,draggedKnee.n,p.px,p.pz);draggedKnee.moved=true;buildModel();render();
+});
+window.addEventListener('mouseup',()=>{if(!draggedKnee)return;const changed=draggedKnee.moved;draggedKnee=null;if(changed){refreshLayerUI();setup();render();document.getElementById('stat').textContent='Interface knee updated; FD model rebuilt.';}});
+
+function surveyChangeAllowed(message='Geometry changed'){
+  if(running){document.getElementById('stat').textContent='Cancel or finish the active acquisition first.';return false;}
+  if(acquisitionTraces.length){document.getElementById('stat').textContent=`${message} — clear existing acquisition records first.`;return false;}
+  return true;
+}
+
+function clearAcquisitionRecords(){
+  running=false;paused=false;shotRecords=[];acquisitionTraces=[];cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;finalStacks.clear();finalRange=null;semb=null;sembDirty=true;
+  activeShotId=null;setup();document.getElementById('pauseAcq').textContent='Pause';document.getElementById('acqProgress').style.width='0%';
+  document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; run an acquisition to measure achieved speed. Solver dt and recorded traces are unchanged.`;
+  refreshShotGallery();refreshReceiverControls();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();
+  document.getElementById('stat').textContent='Acquisition records cleared; geometry preserved.';
+}
+
+function setTool(t){tool=t;hint.textContent=HINTS[t];['tLayer','tSrc','tRec'].forEach(id=>document.getElementById(id).classList.remove('on'));document.getElementById({layer:'tLayer',src:'tSrc',rec:'tRec'}[t]).classList.add('on');render();}
+document.getElementById('tLayer').onclick=()=>setTool('layer');
+document.getElementById('tSrc').onclick=()=>setTool('src');
+document.getElementById('tRec').onclick=()=>setTool('rec');
+
+mCan.addEventListener('click',e=>{
+  const b=mCan.getBoundingClientRect(),px=(e.clientX-b.left)/b.width,pz=(e.clientY-b.top)/b.height;
+  const i=Math.max(3,Math.min(MX-4,Math.round(px*MX)));
+  if(tool==='layer'){
+    return;
+  } else if(tool==='src'){
+    if(e.shiftKey){
+      let bi=-1,bd=1e9;shotPositions.forEach((s,n)=>{const d=Math.abs(s.i-i);if(d<bd){bd=d;bi=n;}});
+      if(bi>=0&&bd<12){const id=shotPositions[bi].id;if(shotRecords.some(s=>s.id===id)){document.getElementById('stat').textContent='This shot has recorded data — clear existing acquisition records first.';return;}shotPositions.splice(bi,1);}
+    }else{
+      const existing=shotPositions.find(s=>Math.abs(s.i-i)<6);
+      if(existing){selectedShotId=existing.id;document.getElementById('stat').textContent=`Selected S${existing.id} at ${existing.i*DX} m; use Re-run Shot to replace only its gather.`;}
+      else{shotPositions.push({id:nextShotId++,i,j:SURF});shotPositions.sort((a,b)=>a.i-b.i);}
+    }
+    render();
+  } else {
+    if(!surveyChangeAllowed('Receiver geometry changed'))return;
+    if(e.shiftKey){let bi=-1,bd=1e9;recs.forEach((r,n)=>{const d=Math.abs(r.i-i);if(d<bd){bd=d;bi=n;}});if(bi>=0&&bd<12)recs.splice(bi,1);}
+    else{const nextId=recs.length?Math.max(...recs.map(r=>r.id))+1:1;recs.push({id:nextId,i,j:SURF});recs.sort((a,b)=>a.i-b.i);}
+    refreshReceiverControls();setup();render();
+  }
+});
+
+function refreshLayerUI(){
+  const box=document.getElementById('layerList');box.innerHTML='';const tb=document.createElement('table');
+  layers.forEach((L,k)=>{
+    const tr=document.createElement('tr');tr.className='layer-row'+(k===selectedLayerIndex?' selected':'');tr.setAttribute('aria-selected',k===selectedLayerIndex?'true':'false');tr.tabIndex=0;tr.innerHTML=`<td><span class="swatch" style="background:${PAL[k%PAL.length]}"></span>${k+1}</td>`;
+    const c1=document.createElement('td'),c2=document.createElement('td'),c3=document.createElement('td');
+    const vi=document.createElement('input');vi.type='number';vi.step=50;vi.value=L.vp;vi.onchange=()=>{if(!surveyChangeAllowed('Model changed')){vi.value=L.vp;return;}L.vp=+vi.value||L.vp;setup();render();};
+    const ri=document.createElement('input');ri.type='number';ri.step=25;ri.value=L.rho;ri.onchange=()=>{if(!surveyChangeAllowed('Model changed')){ri.value=L.rho;return;}L.rho=+ri.value||L.rho;setup();render();};
+    c3.innerHTML=k===0?'<span class="knee-count">fixed surface</span>':`<span class="knee-count">${L.knees.length} knees</span>`;
+    c1.appendChild(vi);c2.appendChild(ri);tr.appendChild(c1);tr.appendChild(c2);tr.appendChild(c3);tr.onclick=()=>selectLayer(k);tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectLayer(k);}};tb.appendChild(tr);
+  });
+  const hd=document.createElement('tr');hd.innerHTML='<td></td><td style="color:#8a949f">Vp</td><td style="color:#8a949f">ρ</td><td style="color:#8a949f">boundary</td>';tb.insertBefore(hd,tb.firstChild);box.appendChild(tb);
+  const remove=document.getElementById('delLayer');remove.disabled=layers.length<=1;remove.textContent=layers.length<=1?'Keep one layer':`Remove #${selectedLayerIndex+1}`;
+  document.getElementById('layerActionHint').textContent=`Selected layer ${selectedLayerIndex+1}: Vp ${layers[selectedLayerIndex].vp} m/s, ρ ${layers[selectedLayerIndex].rho} kg/m³.`;
+}
+
+function selectLayer(index){selectedLayerIndex=Math.max(0,Math.min(layers.length-1,index));selectedInterface=selectedLayerIndex>0?selectedLayerIndex:null;setTool('layer');refreshLayerUI();render();}
+document.getElementById('addLayer').onclick=()=>{if(!surveyChangeAllowed('Model changed')||layers.length>=7)return;const last=layers[layers.length-1],depths=DEFAULT_KNEE_X.map(x=>Math.min(.96,(interpolateKnees(last.knees,x)+1)/2));layers.push(modelLayer(last.vp+800,last.rho+150,depths));selectedLayerIndex=layers.length-1;selectedInterface=selectedLayerIndex;refreshLayerUI();setup();render();};
+document.getElementById('delLayer').onclick=()=>{
+  if(!surveyChangeAllowed('Model changed'))return;if(layers.length<=1){document.getElementById('stat').textContent='The model must retain at least one layer.';return;}
+  const index=Math.max(0,Math.min(layers.length-1,selectedLayerIndex)),removed=layers.splice(index,1)[0];
+  if(index===0)layers[0].knees=kneesFromDepths([0,0,0,0,0]);
+  selectedLayerIndex=Math.min(index,layers.length-1);selectedInterface=selectedLayerIndex>0?selectedLayerIndex:null;
+  refreshLayerUI();setup();render();document.getElementById('stat').textContent=`Removed selected layer ${index+1} (Vp ${removed.vp} m/s).`;
+};
+
+const MODEL_PRESET_INFO={flat:'Four horizontal layers for baseline moveout tests.',anticline:'A steep, smoothly up-arched fold with 13 editable knees per boundary.',syncline:'A deep, smoothly downwarped basin with 13 editable knees per boundary.',wedge:'A layer that pinches on the left and thickens to the right.',channel:'A low-velocity channel fill incised into faster sediments.',reef:'A high-velocity carbonate buildup that pinches out laterally.'};
+function updateModelPresetInfo(){const key=document.getElementById('modelPreset').value;document.getElementById('modelPresetInfo').textContent=MODEL_PRESET_INFO[key]+' Drag knees to edit; right-click a boundary to add more.';}
+function applyGeologicalPreset(){
+  if(!surveyChangeAllowed('Model changed'))return;const key=document.getElementById('modelPreset').value,factory=MODEL_PRESETS[key];if(!factory)return;
+  layers=factory();selectedLayerIndex=1;selectedInterface=1;refreshLayerUI();setup();render();updateModelPresetInfo();document.getElementById('stat').textContent=`Applied ${document.getElementById('modelPreset').selectedOptions[0].text} preset. Every subsurface interface remains editable.`;
+}
+document.getElementById('modelPreset').onchange=updateModelPresetInfo;document.getElementById('applyModelPreset').onclick=applyGeologicalPreset;
+
+const MODEL_W=MX*DX;
+function applyPreset(){
+  if(!surveyChangeAllowed('Receiver geometry changed'))return;
+  const n=Math.max(1,Math.min(120,+document.getElementById('pgN').value||1)),sp=Math.max(DX,+document.getElementById('pgDx').value||DX),first=Math.max(0,+document.getElementById('pgOff').value||0),info=document.getElementById('pgInfo'),farX=first+(n-1)*sp;
+  if(farX>MODEL_W-2*DX){const maxN=Math.floor((MODEL_W-2*DX-first)/sp)+1;info.textContent=`Spread needs ${farX.toFixed(0)} m but the model is ${MODEL_W} m wide. Max ${Math.max(0,maxN)} receivers.`;info.style.color='#ffb35c';return;}
+  recs=[];for(let k=0;k<n;k++)recs.push({id:k+1,i:Math.round((first+k*sp)/DX),j:SURF});info.textContent=`${n} fixed receivers from ${first.toFixed(0)} to ${farX.toFixed(0)} m; spacing ${sp.toFixed(0)} m.`;info.style.color='';refreshReceiverControls();setup();render();
+}
+document.getElementById('pgApply').onclick=applyPreset;
+function applyTeachingSurvey(){
+  if(!surveyChangeAllowed('Survey geometry changed'))return;
+  recs=Array.from({length:DEFAULT_RECEIVER_COUNT},(_,n)=>({id:n+1,i:Math.round((DEFAULT_RECEIVER_FIRST_X+n*DEFAULT_RECEIVER_SPACING)/DX),j:SURF}));
+  shotPositions=DEFAULT_SHOT_X.map((x,n)=>({id:n+1,i:Math.round(x/DX),j:SURF}));nextShotId=DEFAULT_SHOT_X.length+1;selectedShotId=1;
+  document.getElementById('pgN').value=DEFAULT_RECEIVER_COUNT;document.getElementById('pgDx').value=DEFAULT_RECEIVER_SPACING;document.getElementById('pgOff').value=DEFAULT_RECEIVER_FIRST_X;
+  document.getElementById('pgInfo').textContent=`Teaching survey: ${shotPositions.length} shots from ${DEFAULT_SHOT_X[0]} to ${DEFAULT_SHOT_X.at(-1)} m; ${recs.length} receivers from ${DEFAULT_RECEIVER_FIRST_X} to ${DEFAULT_RECEIVER_FIRST_X+(DEFAULT_RECEIVER_COUNT-1)*DEFAULT_RECEIVER_SPACING} m.`;
+  refreshReceiverControls();setup();drawCmpViews();render();
+}
+document.getElementById('surveyPreset').onclick=applyTeachingSurvey;
+function calculatedSourceBounds(){
+  if(!recs.length)return{first:100,last:MODEL_W-100};
+  const xs=recs.map(r=>r.i*DX),rMin=Math.min(...xs),rMax=Math.max(...xs),receiverSpan=Math.max(100,rMax-rMin),pad=Math.max(80,receiverSpan*.20);
+  return{first:Math.max(2*DX,Math.round((rMin-pad)/DX)*DX),last:Math.min(MODEL_W-2*DX,Math.round((rMax+pad)/DX)*DX)};
+}
+function applySourceCountPreset(count){
+  if(!surveyChangeAllowed('Source geometry changed'))return;count=Math.max(2,Math.min(80,count));const {first,last}=calculatedSourceBounds(),positions=[];
+  for(let n=0;n<count;n++)positions.push(Math.round((first+n/(count-1)*(last-first))/DX)*DX);
+  shotPositions=[...new Set(positions)].map((x,n)=>({id:n+1,i:Math.round(x/DX),j:SURF}));nextShotId=shotPositions.length+1;selectedShotId=shotPositions[0]?.id||null;
+  const spacings=shotPositions.slice(1).map((s,n)=>(s.i-shotPositions[n].i)*DX),meanSpacing=spacings.reduce((a,b)=>a+b,0)/Math.max(1,spacings.length);
+  document.getElementById('pgInfo').textContent=`${shotPositions.length} sources span ${first.toFixed(0)}–${last.toFixed(0)} m (mean spacing ${meanSpacing.toFixed(0)} m), extending beyond the receiver line for wider offsets.`;
+  drawAcquisitionViews();render();document.getElementById('stat').textContent=`Applied ${shotPositions.length}-source survey preset.`;
+}
+document.querySelectorAll('[data-source-count]').forEach(button=>button.onclick=()=>applySourceCountPreset(+button.dataset.sourceCount));
+document.getElementById('simSpeed').onchange=e=>{simulationSpeed=Math.max(1,+e.target.value||1);if(running)resetPropagationPerformance();document.getElementById('stat').textContent=`Propagation target set to ${simulationSpeed}×; FD dt and trace sampling are unchanged.`;document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; ${running?'measuring from this change':'run an acquisition to measure achieved speed'}. Solver dt and recorded traces are unchanged.`;};
+
+function setStage(stage){
+  if(stage!=='final')stopFinalFlip(true);
+  currentStage=stage;document.querySelectorAll('.stage').forEach(el=>el.classList.toggle('on',el.id===`stage${stage[0].toUpperCase()+stage.slice(1)}`));document.querySelectorAll('[data-stage]').forEach(b=>b.classList.toggle('on',b.dataset.stage===stage));
+  if(stage==='cmp')drawCmpViews();if(stage==='nmo'){ensureSemblance();drawNmo();}if(stage==='final')drawFinalSection();render();
+}
+document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>setStage(b.dataset.stage));
+document.getElementById('tabCommonShot').onclick=()=>{document.getElementById('commonShotView').style.display='';document.getElementById('commonReceiverView').style.display='none';document.getElementById('tabCommonShot').classList.add('on');document.getElementById('tabCommonReceiver').classList.remove('on');};
+document.getElementById('tabCommonReceiver').onclick=()=>{document.getElementById('commonShotView').style.display='none';document.getElementById('commonReceiverView').style.display='';document.getElementById('tabCommonShot').classList.remove('on');document.getElementById('tabCommonReceiver').classList.add('on');drawAcquisitionViews();};
+document.getElementById('shotAxis').onchange=()=>{drawAcquisitionViews();refreshShotGallery();};
+document.getElementById('receiverAxis').onchange=drawAcquisitionViews;
+document.getElementById('receiverSelect').onchange=e=>{selectedReceiverId=+e.target.value;drawAcquisitionViews();};
+
+function startAcquisition(onlyShotId=null){
+  if(running)return;if(!recs.length||!shotPositions.length){document.getElementById('stat').textContent='Add at least one shot and one receiver.';return;}
+  acquisitionQueue=onlyShotId===null?shotPositions.slice():shotPositions.filter(s=>s.id===onlyShotId);if(!acquisitionQueue.length)return;
+  cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;finalStacks.clear();finalRange=null;semb=null;sembDirty=true;
+  queueIndex=0;paused=false;cancelRequested=false;rerunOnly=onlyShotId!==null;initializeShotSimulation(acquisitionQueue[0]);resetPropagationPerformance();running=true;scheduleSolverPump();setStage('acquisition');
+}
+document.getElementById('shoot').onclick=()=>startAcquisition();
+document.getElementById('rerunShot').onclick=()=>startAcquisition(selectedShotId);
+document.getElementById('pauseAcq').onclick=e=>{if(!running)return;paused=!paused;e.target.textContent=paused?'Resume':'Pause';};
+document.getElementById('cancelAcq').onclick=()=>{if(running)cancelRequested=true;};
+document.getElementById('clearAcq').onclick=clearAcquisitionRecords;
+document.getElementById('clearShots').onclick=()=>{clearAcquisitionRecords();shotPositions=[];nextShotId=1;selectedShotId=null;setup();render();document.getElementById('stat').textContent='Shots and acquisition records cleared.';};
+document.getElementById('clearGeom').onclick=()=>{if(!surveyChangeAllowed('Receiver geometry changed'))return;recs=[];refreshReceiverControls();setup();render();};
+
+document.getElementById('cmpBinSize').onchange=e=>{cmpBinSize=Math.max(5,+e.target.value||25);e.target.value=cmpBinSize;buildCmpBins();};
+document.getElementById('buildCmp').onclick=()=>{cmpBinSize=Math.max(5,+document.getElementById('cmpBinSize').value||25);buildCmpBins();setStage('cmp');updateFlow();};
+document.getElementById('prevCmp').onclick=()=>moveCmp(-1);document.getElementById('nextCmp').onclick=()=>moveCmp(1);
+document.getElementById('prevCmpNmo').onclick=()=>moveCmp(-1,'nmo');document.getElementById('nextCmpNmo').onclick=()=>moveCmp(1,'nmo');
+document.getElementById('processAll').onclick=processAllCMPs;document.getElementById('finalWiggle').onchange=drawFinalSection;
+document.getElementById('finalGain').oninput=e=>{document.getElementById('finalGainLbl').textContent=(+e.target.value).toFixed(1)+'×';drawFinalSection();};
+document.getElementById('finalTimeGain').onchange=drawFinalSection;
+document.getElementById('finalViewStack').onclick=()=>setFinalComparisonView('stack');
+document.getElementById('finalViewModel').onclick=()=>setFinalComparisonView('model');
+document.getElementById('finalFlip').onchange=e=>setFinalFlip(e.target.checked);
+
+/* Auto-pick: select the strongest semblance peak in time bands, then merge
+   adjacent detections so one reflection does not create several control points. */
+document.getElementById('vAutoPick').onclick=()=>{
+  ensureSemblance();const info=document.getElementById('nmoInfo');if(!semb){info.textContent='Build and select a CMP first.';return;}
+  const cand=[],BANDS=16;for(let bd=0;bd<BANDS;bd++){const a0=Math.floor(bd*sembNT/BANDS),a1=Math.floor((bd+1)*sembNT/BANDS);let bs=0,bvi=-1,bai=-1,sum=0,cnt=0;
+    for(let ai=a0;ai<a1;ai++)for(let vi=0;vi<SEMB_NV;vi++){const s=semb[ai*SEMB_NV+vi];sum+=s;cnt++;if(s>bs){bs=s;bvi=vi;bai=ai;}}
+    const bg=cnt?sum/cnt:0;if(bvi>=0&&bs>3*bg&&bs>.12*sembMax)cand.push({t0:bai/sembNT*tmax,v:sembVmin+bvi/(SEMB_NV-1)*(sembVmax-sembVmin),s:bs});}
+  cand.sort((a,b)=>a.t0-b.t0);picks=[];const mergeDt=.15*tmax;for(const c of cand){const prev=picks[picks.length-1];if(prev&&c.t0-prev.t0<mergeDt){if(c.s>prev.s)picks[picks.length-1]=c;}else picks.push(c);}picks=picks.map(p=>({t0:p.t0,v:p.v}));velocitySource='manual';document.querySelector('input[name="velocitySource"][value="manual"]').checked=true;
+  info.textContent=picks.length?`Auto-picked ${picks.length} point${picks.length>1?'s':''}. Click to refine.`:'No clear semblance peaks found — pick manually.';refreshPickList();drawNmo();updateFlow();
+};
+document.getElementById('vClear').onclick=()=>{picks=[];refreshPickList();document.getElementById('nmoInfo').textContent='Manual picks cleared; manual mode falls back to constant velocity.';drawNmo();updateFlow();};
+document.getElementById('vnmo').oninput=e=>{vnmo=+e.target.value;document.getElementById('vLbl').textContent=vnmo+' m/s';drawNmo();};
+document.getElementById('nmoGain').oninput=e=>{nmoDisplayGain=+e.target.value;document.getElementById('nmoGainLbl').textContent=nmoDisplayGain.toFixed(1)+'×';drawNmo();};
+document.getElementById('nmoDensity').onchange=e=>{nmoDensity=e.target.checked;drawNmo();};
+document.getElementById('exactMoveout').onchange=e=>{showExactMoveout=e.target.checked;drawNmo();};
+document.querySelectorAll('input[name="velocitySource"]').forEach(r=>r.onchange=e=>{velocitySource=e.target.value;drawNmo();updateFlow();});
+document.getElementById('stretchMute').onchange=e=>{stretchLimit=e.target.value==='off'?null:+e.target.value;drawNmo();};
+document.getElementById('vAuto').onclick=()=>{
+  if(selectedCmpIndex===null){document.getElementById('nmoInfo').textContent='Select a CMP first.';return;}
+  velocitySource='model';document.querySelector('input[name="velocitySource"][value="model"]').checked=true;const center=cmpOrigin+selectedCmpIndex*cmpBinSize,points=modelRmsFunctionAt(center),dipping=modelHasLateralVariation();
+  document.getElementById('nmoInfo').textContent=`Model RMS reference at ${center.toFixed(0)} m: ${points.slice(1).map(p=>`${p.t0.toFixed(2)} s → ${p.v.toFixed(0)} m/s`).join(', ')}.`+(dipping?' For dipping reflectors, stacking velocity differs from simple vertical RMS and CMP stacking needs DMO/migration.':'');drawNmo();updateFlow();
+};
+
+document.getElementById('freq').onchange=e=>{if(!surveyChangeAllowed('Wavelet changed')){e.target.value=f0;return;}f0=+e.target.value;document.getElementById('fLbl').textContent=f0+' Hz';setup();render();};
+document.getElementById('freq').oninput=e=>document.getElementById('fLbl').textContent=e.target.value+' Hz';
+document.getElementById('tmax').onchange=e=>{if(!surveyChangeAllowed('Record length changed')){e.target.value=tmax;document.getElementById('tLbl').textContent=tmax.toFixed(2)+' s';return;}tmax=+e.target.value;document.getElementById('tLbl').textContent=tmax.toFixed(2)+' s';setup();render();};
+document.getElementById('tmax').oninput=e=>document.getElementById('tLbl').textContent=(+e.target.value).toFixed(2)+' s';
+
+function runNumericalChecks(){
+  const results=[];const midpoint=(100+500)/2,offset=500-100,halfOffset=offset/2;results.push({test:'midpoint / offset metadata',pass:midpoint===300&&offset===400&&halfOffset===200});
+  results.push({test:'editable model boundaries start with five knees',pass:layers.slice(1).every(layer=>layer.knees.length===5)});
+  const antiTest=MODEL_PRESETS.anticline(),synTest=MODEL_PRESETS.syncline(),wedgeTest=MODEL_PRESETS.wedge();
+  results.push({test:'anticline and syncline presets curve in opposite directions',pass:interpolateKnees(antiTest[1].knees,.5)<interpolateKnees(antiTest[1].knees,0)&&interpolateKnees(synTest[1].knees,.5)>interpolateKnees(synTest[1].knees,0)});
+  results.push({test:'fold presets use dense smooth high-relief boundaries',pass:antiTest.slice(1).every(layer=>layer.knees.length===13)&&synTest.slice(1).every(layer=>layer.knees.length===13)&&(interpolateKnees(antiTest[1].knees,0)-interpolateKnees(antiTest[1].knees,.5))>.2&&(interpolateKnees(synTest[1].knees,.5)-interpolateKnees(synTest[1].knees,0))>.25});
+  results.push({test:'wedge preset thickens laterally',pass:(interpolateKnees(wedgeTest[2].knees,1)-interpolateKnees(wedgeTest[1].knees,1))>(interpolateKnees(wedgeTest[2].knees,0)-interpolateKnees(wedgeTest[1].knees,0))});
+  results.push({test:'CMP nearest-bin sorting',pass:cmpIndexForMidpoint(287.4,25)===11&&cmpIndexForMidpoint(312.6,25)===13});
+  const fdK=simIdx(Math.floor(MX/2),Math.floor(MZ/2)),pc=.37,pp=-.14,pxp=.21,pxm=.42,pzp=-.30,pzm=.18,rk=rho[fdK],a=absorb[fdK];
+  const lap=((pxp-pc)/(.5*(rk+rho[fdK+1]))-(pc-pxm)/(.5*(rk+rho[fdK-1]))+(pzp-pc)/(.5*(rk+rho[fdK+NX]))-(pc-pzm)/(.5*(rk+rho[fdK-NX])))/(DX*DX);
+  const fdOriginal=(2*pc-(1-a)*pp+dt*dt*vp[fdK]*vp[fdK]*rk*lap)/(1+a),fdFast=fdCenter[fdK]*pc+fdPrevious[fdK]*pp+fdXp[fdK]*pxp+fdXm[fdK]*pxm+fdZp[fdK]*pzp+fdZm[fdK]*pzm;
+  results.push({test:'precomputed FD stencil matches original update',pass:Math.abs(fdOriginal-fdFast)<1e-6*Math.max(1,Math.abs(fdOriginal))});
+  const testDt=.002,testNt=700,trueT0=.45,trueV=2200,offsets=[-600,-300,0,300,600];
+  const synthetic=offsets.map((sourceReceiverOffset,k)=>{const samples=new Float32Array(testNt),arrival=moveoutTime(trueT0,sourceReceiverOffset,trueV,0);for(let a=0;a<testNt;a++){const q=(a*testDt-arrival)/.006;samples[a]=Math.exp(-q*q);}return{shotId:k+1,receiverId:k+1,sourceX:0,receiverX:sourceReceiverOffset,midpointX:0,sourceReceiverOffset,halfOffset:sourceReceiverOffset/2,samples,dt:testDt,nt:testNt};});
+  const corrected=applyNMO(synthetic,()=>trueV,null,0),peakIndices=corrected.correctedRecords.map(r=>{let bi=0;for(let a=1;a<r.nt;a++)if(r.samples[a]>r.samples[bi])bi=a;return bi;}),target=Math.round(trueT0/testDt),flatError=Math.max(...peakIndices.map(i=>Math.abs(i-target)));results.push({test:'zero-delay synthetic hyperbola flattens after NMO',pass:flatError<=2});
+  const coherence=v=>{let sum=0,sq=0;for(const r of synthetic){const t=moveoutTime(trueT0,r.sourceReceiverOffset,v,0),f=t/testDt,i=Math.floor(f),w=f-i,s=r.samples[i]*(1-w)+r.samples[i+1]*w;sum+=s;sq+=s*s;}return sum*sum/(synthetic.length*sq);};results.push({test:'semblance peak near known velocity',pass:coherence(trueV)>coherence(1700)&&coherence(trueV)>coherence(3000)});
+  const stack=stackOf(corrected);let peak=0;for(let a=1;a<stack.nt;a++)if(stack.samples[a]>stack.samples[peak])peak=a;results.push({test:'NMO stack event at known t0',pass:Math.abs(peak-target)<=2&&stack.samples[peak]>.9});
+  const muted=applyNMO([synthetic[synthetic.length-1]],()=>trueV,.3,0);results.push({test:'stretch mute marks shallow far-offset sample invalid',pass:muted.valid[0][Math.round(.1/testDt)]===0});
+  const delayedT0=.45,testDelay=.044,delayed=offsets.map((sourceReceiverOffset,k)=>{const samples=new Float32Array(testNt),arrival=moveoutTime(delayedT0,sourceReceiverOffset,trueV,testDelay);for(let a=0;a<testNt;a++){const q=(a*testDt-arrival)/.006;samples[a]=Math.exp(-q*q);}return{...synthetic[k],samples};}),delayedCorrected=applyNMO(delayed,()=>trueV,null,testDelay),delayedPeaks=delayedCorrected.correctedRecords.map(r=>{let bi=0;for(let a=1;a<r.nt;a++)if(r.samples[a]>r.samples[bi])bi=a;return bi;});
+  results.push({test:'causal-wavelet-delay hyperbola flattens after NMO',pass:Math.max(...delayedPeaks.map(i=>Math.abs(i-target)))<=2});
+  const centerX=MX*DX/2,firstModelPoint=modelRmsFunctionAt(centerX)[1],modelI=Math.round(centerX/DX),expectedFirst=sourceWaveletDelay()+2*(modelInterfaceDepth(1,modelI)-SURF*DX)/layers[0].vp;
+  results.push({test:'model RMS uses acquisition datum and wavelet delay',pass:Math.abs(firstModelPoint.t0-expectedFirst)<1e-9&&Math.abs(firstModelPoint.v-layers[0].vp)<1e-9});
+  results.push({test:'time-model reference uses seismic peak convention',pass:Math.abs(modelTimeBoundariesAt(centerX)[1]-firstModelPoint.t0)<1e-9});
+  const exactFirst=sourceWaveletDelay()+exactLayeredTime(modelVerticalSegmentsAt(centerX,1),600),hyperbolicFirst=moveoutTime(firstModelPoint.t0,600,firstModelPoint.v);
+  results.push({test:'exact layered curve matches first-layer hyperbola',pass:Math.abs(exactFirst-hyperbolicFirst)<1e-8});
+  console.group('CMP sandbox numerical checks');console.table(results);results.forEach(r=>console.assert(r.pass,r.test));console.groupEnd();
+}
+
+/* init */
+refreshLayerUI();updateModelPresetInfo();refreshReceiverControls();setup();buildCmpBins(false);refreshShotGallery();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();render();runNumericalChecks();frame();
+</script>
+</body>
+</html>

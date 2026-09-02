@@ -160,6 +160,13 @@
       <div class="hint" style="margin-top:5px">Source presets — automatically wider than the receiver spread</div>
       <div class="preset-grid" id="sourcePresets"><button data-source-count="3">3 shots</button><button data-source-count="5">5 shots</button><button data-source-count="10">10 shots</button><button data-source-count="20">20 shots</button><button data-source-count="25">25 shots</button></div>
       <div class="hint" id="pgInfo">Default: 28 shots at 40 m spacing, 40 central receivers at 20 m.</div>
+      <p class="ttl" style="margin-top:8px">Environment</p>
+      <label>Setting <select id="environment"><option value="onshore">Onshore (land)</option><option value="offshore">Offshore (marine)</option></select></label>
+      <div id="marineBox" style="display:none">
+        <table><tr><td>Water depth (m)</td><td><input type="number" id="waterDepthInput" value="150" min="25" step="25"></td></tr></table>
+        <button id="applyWater">Apply water depth</button>
+      </div>
+      <div class="hint" id="environmentInfo">Onshore: sources and receivers are planted in rock at the acquisition datum.</div>
       <p class="ttl" style="margin-top:8px">Acquisition geometry</p>
       <label>Mode <select id="acqMode"><option value="fixed">Fixed spread (land)</option><option value="streamer">Towed streamer (marine)</option></select></label>
       <div id="streamerBox" style="display:none">
@@ -461,6 +468,28 @@ let layers = [
 ];
 const PAL = ['#2f4858','#33697d','#3f9098','#7fb8a4','#c9d6a3','#e0b97d','#c98b6b'];
 
+/* Onshore / offshore.
+   Water is a genuinely acoustic medium, so a marine survey is one of the few
+   things this solver can model honestly rather than approximate. Offshore adds
+   a water column of WATER_DEPTH metres over the top of the model: it replaces
+   whatever rock is there instead of pushing the geology down, so a model keeps
+   its shape when the environment is switched and only the shallowest unit is
+   overlain.
+   Everything else marine follows from the physics rather than being faked --
+   the seabed impedance jump, the source and receiver ghosts from the sea
+   surface, and the water-column multiples all emerge from the wave equation
+   once the water and the free surface are there. */
+let environment='onshore';
+let waterDepth=0;
+const WATER_VP=1500, WATER_RHO=1030, WATER_COLOR='#17475e';
+function datumDepth(){return SURF*DX;}
+function isSubmerged(){return waterDepth>datumDepth();}
+function datumVelocity(){return isSubmerged()?WATER_VP:layers[0].vp;}
+function seabedReflectionCoefficient(){
+  const zWater=WATER_VP*WATER_RHO,zRock=layers[0].vp*layers[0].rho;
+  return (zRock-zWater)/(zRock+zWater);
+}
+
 const MODEL_PRESETS={
   flat:()=>[
     modelLayer(1600,1900,[0,0,0,0,0]),modelLayer(2400,2200,[.28,.28,.28,.28,.28]),modelLayer(3200,2450,[.52,.52,.52,.52,.52]),modelLayer(4500,2700,[.76,.76,.76,.76,.76])],
@@ -515,6 +544,12 @@ function buildModel(){
   for(let i=0;i<NX;i++){
     const mi = Math.max(0, Math.min(MX-1, i-OX));   // nearest model column
     for(let j=0;j<NZ;j++){
+      // The sea covers the halo too -- water does not stop at the edge of the
+      // region the user drew, and a wall of rock there would reflect.
+      if(waterDepth>0&&(j-OZ)*DX<waterDepth){
+        vp[j*NX+i]=WATER_VP; rho[j*NX+i]=WATER_RHO;
+        continue;
+      }
       const zf = Math.min(0.999, (j-OZ)/MZ);
       let li = 0;
       for(let k=0;k<layers.length;k++) if(zf >= ifaceZ(k, mi)) li = k;
@@ -923,6 +958,18 @@ function drawModel(){
     mc.fillStyle='rgba(255,255,255,.75)';
     mc.fillText(`${layers[k].vp} m/s · ${layers[k].rho} kg/m³ · Z ${(acousticImpedance(layers[k])/1e6).toFixed(2)}`,Math.max(6,Math.min(CW-250,labelI/(MX-1)*CW-95)),ly);
   }
+  // Sea column, drawn over the rock fills so the geology keeps its shape when
+  // the environment is switched and only the shallowest part is overlain.
+  if(waterDepth>0){
+    const seabedY=Math.min(CH,waterDepth/(MZ*DX)*CH);
+    mc.fillStyle=WATER_COLOR;mc.fillRect(0,0,CW,seabedY);
+    mc.strokeStyle='rgba(140,215,255,.85)';mc.lineWidth=1.5;
+    mc.beginPath();mc.moveTo(0,seabedY);mc.lineTo(CW,seabedY);mc.stroke();
+    mc.fillStyle='rgba(190,225,245,.85)';mc.font='11px ui-sans-serif,sans-serif';
+    mc.fillText(`sea · ${WATER_VP} m/s · ${WATER_RHO} kg/m³ · Z ${(WATER_VP*WATER_RHO/1e6).toFixed(2)}`,8,Math.max(14,seabedY-20));
+    mc.fillText(`seabed ${waterDepth.toFixed(0)} m · R ${seabedReflectionCoefficient().toFixed(3)}`,8,Math.max(26,seabedY-6));
+  }
+
   // wavefield
   if(captureWavefieldFrame()){
     const d=wfImg.data;
@@ -1641,23 +1688,36 @@ function modelInterfaceDepth(interfaceIndex,modelI){
 /* One-way thickness and two-way vertical interval time from the acquisition
    datum to a chosen reflector. Sources and receivers sit SURF*DX metres below
    model zero, so the first layer must start at that datum rather than z=0. */
-function modelVerticalSegmentsAt(midpointX,throughInterface=layers.length-1){
+/* The vertical column below the acquisition datum, as a list of segments.
+   `layerIndex` is -1 for the water column. The second argument is a SEGMENT
+   COUNT, not a layer-interface index: once water can be prepended the two stop
+   coinciding, and callers that want "the column down to the nth reflector"
+   need the count. Layer tops and bases are clamped to the seabed, so a unit
+   that lies entirely under water contributes nothing. */
+function modelVerticalSegmentsAt(midpointX,maxSegments=Infinity){
   const modelI=Math.max(0,Math.min(MX-1,Math.round(midpointX/DX)));
-  const segments=[];
-  for(let k=0;k<Math.min(throughInterface,layers.length-1);k++){
-    const top=k===0?Math.max(SURF*DX,modelInterfaceDepth(0,modelI)):modelInterfaceDepth(k,modelI);
-    const bottom=modelInterfaceDepth(k+1,modelI),thickness=Math.max(0,bottom-top),velocity=layers[k].vp;
+  const segments=[],datum=datumDepth(),floor=Math.max(datum,waterDepth);
+  if(isSubmerged()){
+    const thickness=waterDepth-datum;
+    segments.push({layerIndex:-1,thickness,velocity:WATER_VP,intervalT:2*thickness/WATER_VP});
+  }
+  for(let k=0;k<layers.length-1;k++){
+    const top=Math.max(floor,modelInterfaceDepth(k,modelI));
+    const bottom=Math.max(floor,modelInterfaceDepth(k+1,modelI));
+    const thickness=Math.max(0,bottom-top),velocity=layers[k].vp;
     if(thickness>0)segments.push({layerIndex:k,thickness,velocity,intervalT:2*thickness/velocity});
   }
-  return segments;
+  return Number.isFinite(maxSegments)?segments.slice(0,Math.max(0,maxSegments)):segments;
 }
 
+function segmentDensity(segment){return segment.layerIndex<0?WATER_RHO:layers[segment.layerIndex].rho;}
+function segmentColor(segment){return segment.layerIndex<0?WATER_COLOR:layerColor(segment.layerIndex);}
+
 function modelRmsFunctionAt(midpointX){
-  let sumT=0,sumV2T=0;const points=[{t0:0,v:layers[0].vp,interfaceIndex:0}],delay=sourceWaveletDelay();
-  const segments=modelVerticalSegmentsAt(midpointX);
-  segments.forEach((segment,k)=>{
+  let sumT=0,sumV2T=0;const points=[{t0:0,v:datumVelocity(),segmentCount:0}],delay=sourceWaveletDelay();
+  modelVerticalSegmentsAt(midpointX).forEach((segment,k)=>{
     sumT+=segment.intervalT;sumV2T+=segment.velocity*segment.velocity*segment.intervalT;
-    points.push({t0:delay+sumT,v:Math.sqrt(sumV2T/sumT),interfaceIndex:k+1});
+    points.push({t0:delay+sumT,v:Math.sqrt(sumV2T/sumT),segmentCount:k+1});
   });
   return points;
 }
@@ -1666,7 +1726,7 @@ function modelRmsFunctionAt(midpointX){
    interpolation between the RMS values at adjacent interfaces. */
 function modelVAt(t0,midpointX){
   const physicalT=Math.max(0,t0-sourceWaveletDelay());
-  if(physicalT<=0)return layers[0].vp;
+  if(physicalT<=0)return datumVelocity();
   let remaining=physicalT,sumT=0,sumV2T=0;
   for(const segment of modelVerticalSegmentsAt(midpointX)){
     const used=Math.min(remaining,segment.intervalT);
@@ -1700,7 +1760,7 @@ function exactModelMoveoutTime(t0,offset,midpointX){
   const reflectors=modelRmsFunctionAt(midpointX).slice(1);
   if(!reflectors.length)return null;
   const reflector=reflectors.reduce((best,p)=>Math.abs(p.t0-t0)<Math.abs(best.t0-t0)?p:best,reflectors[0]);
-  const physical=exactLayeredTime(modelVerticalSegmentsAt(midpointX,reflector.interfaceIndex),offset);
+  const physical=exactLayeredTime(modelVerticalSegmentsAt(midpointX,reflector.segmentCount),offset);
   return physical===null?null:sourceWaveletDelay()+physical;
 }
 
@@ -2744,14 +2804,30 @@ function finalDisplayProfile(stacks){
    The causal source-wavelet delay is included so a flat model boundary lines
    up with the peak time convention used by the displayed synthetic traces. */
 function modelTimeBoundariesAt(midpointX){
-  const modelI=Math.max(0,Math.min(MX-1,Math.round(midpointX/DX))),times=[0],delay=sourceWaveletDelay();
-  let depth=SURF*DX,physicalT=0;
-  for(let k=1;k<layers.length;k++){
-    const nextDepth=Math.max(depth,modelInterfaceDepth(k,modelI));
-    physicalT+=2*(nextDepth-depth)/layers[k-1].vp;
-    times.push(delay+physicalT);depth=nextDepth;
-  }
+  const times=[0],delay=sourceWaveletDelay();let physicalT=0;
+  modelVerticalSegmentsAt(midpointX).forEach(segment=>{physicalT+=segment.intervalT;times.push(delay+physicalT);});
   return times;
+}
+
+/* Colour of each band in the time-domain model reference, and the reflection
+   coefficient at each boundary between them. Derived from the same segment
+   list as the velocities, so the seabed appears automatically offshore. */
+function modelBandColorsAt(midpointX){
+  const colors=modelVerticalSegmentsAt(midpointX).map(segmentColor);
+  colors.push(layerColor(layers.length-1));
+  return colors;
+}
+function modelInterfacesAt(midpointX){
+  const segments=modelVerticalSegmentsAt(midpointX),delay=sourceWaveletDelay(),out=[];
+  let t=0;
+  const deepest={layerIndex:layers.length-1,velocity:layers[layers.length-1].vp};
+  segments.forEach((segment,k)=>{
+    t+=segment.intervalT;
+    const below=k+1<segments.length?segments[k+1]:deepest;
+    const zAbove=segment.velocity*segmentDensity(segment),zBelow=below.velocity*segmentDensity(below);
+    out.push({time:delay+t,R:(zBelow-zAbove)/(zBelow+zAbove)});
+  });
+  return out;
 }
 
 function rgbFromHex(hex){const n=parseInt(hex.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255];}
@@ -2759,24 +2835,43 @@ function rgbFromHex(hex){const n=parseInt(hex.slice(1),16);return[(n>>16)&255,(n
 function drawFinalModelReference(ctx,L,T,pw,ph,min,max){
   const image=ctx.createImageData(pw,ph),pixels=image.data,minX=cmpOrigin+min*cmpBinSize,maxX=cmpOrigin+max*cmpBinSize;
   for(let x=0;x<pw;x++){
-    const midpointX=minX+x/Math.max(1,pw-1)*(maxX-minX),times=modelTimeBoundariesAt(midpointX);
+    const midpointX=minX+x/Math.max(1,pw-1)*(maxX-minX);
+    const times=modelTimeBoundariesAt(midpointX),colors=modelBandColorsAt(midpointX);
     for(let y=0;y<ph;y++){
-      const time=y/Math.max(1,ph-1)*tmax;let layerIndex=0;
-      while(layerIndex+1<times.length&&time>=times[layerIndex+1])layerIndex++;
-      const [r,g,b]=rgbFromHex(layerColor(layerIndex)),o=(y*pw+x)*4;
+      const time=y/Math.max(1,ph-1)*tmax;let band=0;
+      while(band+1<times.length&&time>=times[band+1])band++;
+      const [r,g,b]=rgbFromHex(colors[Math.min(band,colors.length-1)]),o=(y*pw+x)*4;
       pixels[o]=Math.round(r*.88);pixels[o+1]=Math.round(g*.88);pixels[o+2]=Math.round(b*.88);pixels[o+3]=255;
     }
   }
   ctx.putImageData(image,L,T);
-  for(let k=1;k<layers.length;k++){
-    const z1=layers[k-1].vp*layers[k-1].rho,z2=layers[k].vp*layers[k].rho,rc=(z2-z1)/(z2+z1);
-    const traceBoundary=dy=>{ctx.beginPath();for(let x=0;x<=pw;x+=2){const midpointX=minX+x/Math.max(1,pw)*(maxX-minX),time=modelTimeBoundariesAt(midpointX)[k],y=T+time/tmax*ph+dy;x?ctx.lineTo(L+x,y):ctx.moveTo(L+x,y);}ctx.stroke();};
-    ctx.strokeStyle='rgba(0,0,0,.72)';ctx.lineWidth=2.2+Math.min(3,Math.abs(rc)*9);traceBoundary(2);
-    ctx.strokeStyle=`rgba(255,225,157,${Math.min(.95,.55+Math.abs(rc)*1.4)})`;ctx.lineWidth=1.2+Math.min(2.5,Math.abs(rc)*7);traceBoundary(0);
+  /* Boundaries are sampled per column rather than indexed by layer: a unit that
+     pinches out contributes no segment there, so the number of interfaces is a
+     function of position and a line has to break where its interface stops
+     existing. Line weight tracks the reflection coefficient. */
+  const columns=[];
+  for(let x=0;x<=pw;x+=2)columns.push({x,list:modelInterfacesAt(minX+x/Math.max(1,pw)*(maxX-minX))});
+  const deepest=columns.reduce((most,column)=>Math.max(most,column.list.length),0);
+  for(let k=0;k<deepest;k++){
+    const present=columns.filter(column=>column.list.length>k);
+    if(!present.length)continue;
+    const meanR=present.reduce((sum,column)=>sum+Math.abs(column.list[k].R),0)/present.length;
+    const traceBoundary=dy=>{
+      ctx.beginPath();let drawing=false;
+      columns.forEach(column=>{
+        if(column.list.length<=k){drawing=false;return;}
+        const y=T+column.list[k].time/tmax*ph+dy;
+        drawing?ctx.lineTo(L+column.x,y):ctx.moveTo(L+column.x,y);drawing=true;
+      });
+      ctx.stroke();
+    };
+    ctx.strokeStyle='rgba(0,0,0,.72)';ctx.lineWidth=2.2+Math.min(3,meanR*9);traceBoundary(2);
+    ctx.strokeStyle=`rgba(255,225,157,${Math.min(.95,.55+meanR*1.4)})`;ctx.lineWidth=1.2+Math.min(2.5,meanR*7);traceBoundary(0);
   }
-  ctx.fillStyle='rgba(7,12,18,.72)';ctx.fillRect(L+8,T+8,255,36);
+  ctx.fillStyle='rgba(7,12,18,.72)';ctx.fillRect(L+8,T+8,296,isSubmerged()?50:36);
   ctx.fillStyle='#f0d38a';ctx.font='11px ui-sans-serif';ctx.fillText('ORIGINAL MODEL · VERTICAL TWT',L+16,T+23);
   ctx.fillStyle='#b8c2cc';ctx.font='10px ui-sans-serif';ctx.fillText(`includes ${(sourceWaveletDelay()*1000).toFixed(0)} ms causal-wavelet delay`,L+16,T+38);
+  if(isSubmerged())ctx.fillText(`${waterDepth.toFixed(0)} m water · seabed R ${seabedReflectionCoefficient().toFixed(3)}`,L+16,T+51);
 }
 
 function updateFinalViewControls(){
@@ -2885,7 +2980,7 @@ function collectSessionState(){
     shots:shotPositions.map(shot=>({id:shot.id,i:shot.i})),
     nextShotId,selectedShotId,
     acquisition:{mode:acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide,
-      topBoundary,f0,tmax,simulationSpeed},
+      topBoundary,f0,tmax,simulationSpeed,environment,waterDepth},
     processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),
       pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
       noiseLevel,velocitySource,vnmo,stretchLimit,
@@ -2941,6 +3036,8 @@ function applySessionState(state){
   streamerNearOffset=clampNumber(acq.streamerNearOffset,streamerNearOffset,0,2000);
   streamerSide=pickFrom(acq.streamerSide,['trailing','leading','split'],streamerSide);
   topBoundary=pickFrom(acq.topBoundary,['free','absorbing'],topBoundary);
+  environment=pickFrom(acq.environment,['onshore','offshore'],environment);
+  waterDepth=environment==='offshore'?clampNumber(acq.waterDepth,150,MIN_WATER_DEPTH,MZ*DX*.6):0;
   f0=clampNumber(acq.f0,f0,8,60);
   tmax=clampNumber(acq.tmax,tmax,.4,3);
   simulationSpeed=clampNumber(acq.simulationSpeed,simulationSpeed,1,16);
@@ -2983,7 +3080,7 @@ function applySessionState(state){
   const restoredPicks=picks,restoredPickSets=pickSets;
   clearAcquisitionRecords();
   picks=restoredPicks;pickSets=restoredPickSets;
-  refreshLayerUI();refreshAcquisitionModeUI();refreshReceiverControls();refreshPickList();
+  refreshLayerUI();refreshEnvironmentUI();refreshAcquisitionModeUI();refreshReceiverControls();refreshPickList();
   setup();drawCmpViews();drawFinalSection();updateFlow();render();
   return true;
 }
@@ -3247,6 +3344,46 @@ function applySourceCountPreset(count){
 }
 document.querySelectorAll('[data-source-count]').forEach(button=>button.onclick=()=>applySourceCountPreset(+button.dataset.sourceCount));
 document.getElementById('showRays').onchange=e=>{wavefieldBoost=e.target.checked;render();};
+
+/* Marine defaults are not cosmetic: the sea surface is a genuine free surface
+   (air over water, R = -1), so ghosts and water-column multiples are physically
+   compulsory offshore, and a marine survey tows its spread rather than planting
+   it. Switching environment therefore sets both, and says so. */
+const MIN_WATER_DEPTH=25;
+function ghostNotchHz(depth){return depth>0?WATER_VP/(2*depth):Infinity;}
+function refreshEnvironmentUI(){
+  const marine=environment==='offshore';
+  document.getElementById('marineBox').style.display=marine?'':'none';
+  document.getElementById('environment').value=environment;
+  document.getElementById('waterDepthInput').value=Math.max(MIN_WATER_DEPTH,waterDepth||150);
+  const info=document.getElementById('environmentInfo');
+  if(!marine){info.textContent='Onshore: sources and receivers are planted in rock at the acquisition datum.';return;}
+  const datum=datumDepth();
+  info.textContent=`Offshore: ${waterDepth.toFixed(0)} m of water over the model. Source and streamer sit at ${datum.toFixed(0)} m, so each carries a sea-surface ghost — at vertical incidence its first notch falls at ${ghostNotchHz(datum).toFixed(0)} Hz, moving higher with offset. Seabed R ${seabedReflectionCoefficient().toFixed(3)} over a free sea surface drives the water-column multiples.`;
+}
+function applyEnvironment(nextEnvironment,depth){
+  if(!surveyChangeAllowed('Environment changed'))return false;
+  environment=nextEnvironment==='offshore'?'offshore':'onshore';
+  if(environment==='offshore'){
+    waterDepth=Math.max(MIN_WATER_DEPTH,Math.min(MZ*DX*.6,depth||150));
+    // The sea surface is a free surface; an absorbing top would be unphysical.
+    topBoundary='free';document.getElementById('topBoundary').value='free';
+    acquisitionMode='streamer';
+  }else{
+    waterDepth=0;
+    acquisitionMode='fixed';
+  }
+  refreshEnvironmentUI();refreshAcquisitionModeUI();syncActiveReceivers();refreshReceiverControls();
+  setup();drawCmpViews();drawFinalSection();render();
+  document.getElementById('stat').textContent=environment==='offshore'
+    ?`Marine survey: ${waterDepth.toFixed(0)} m water, towed streamer, free sea surface. Re-run acquisition to record it.`
+    :'Land survey: no water column, fixed planted spread. Re-run acquisition to record it.';
+  return true;
+}
+document.getElementById('environment').onchange=e=>{
+  if(!applyEnvironment(e.target.value,+document.getElementById('waterDepthInput').value))e.target.value=environment;
+};
+document.getElementById('applyWater').onclick=()=>applyEnvironment('offshore',+document.getElementById('waterDepthInput').value);
 function describeNoise(){return noiseLevel?`${Math.round(noiseLevel*100)}% · SNR ${noiseSnrDb().toFixed(1)} dB`:'off';}
 document.getElementById('noiseLevel').oninput=e=>{
   noiseLevel=Math.max(0,(+e.target.value||0)/100);
@@ -3592,6 +3729,38 @@ function runNumericalChecks(){
   results.push({test:'velocity field holds, not extrapolates, beyond the picked range',
     pass:Math.abs(fieldBeyondLo-2000)<1e-9&&Math.abs(fieldBeyondHi-3000)<1e-9});
 
+  // --- onshore / offshore -------------------------------------------------
+  const savedEnvironment=environment,savedWaterDepth=waterDepth;
+  const dryColumn=modelVerticalSegmentsAt(MX*DX/2);
+  environment='offshore';waterDepth=150;
+  const wetColumn=modelVerticalSegmentsAt(MX*DX/2);
+  const waterSegment=wetColumn[0];
+  const expectedWaterTime=2*(150-datumDepth())/WATER_VP;
+  results.push({test:'offshore prepends a water segment at 1500 m/s',
+    pass:waterSegment&&waterSegment.layerIndex===-1&&waterSegment.velocity===WATER_VP
+      &&Math.abs(waterSegment.intervalT-expectedWaterTime)<1e-9});
+  // Water replaces the shallowest rock rather than pushing the geology down, so
+  // the total column time must FALL (water is slower, but it displaces the
+  // interval it covers) and the deep interfaces must keep their identity.
+  const totalTimeOf=column=>column.reduce((sum,segment)=>sum+segment.intervalT,0);
+  results.push({test:'water replaces shallow rock instead of displacing the section',
+    pass:wetColumn.length>=dryColumn.length&&totalTimeOf(wetColumn)>totalTimeOf(dryColumn)});
+  results.push({test:'RMS velocity at the datum is the water velocity offshore',
+    pass:Math.abs(modelVAt(0,MX*DX/2)-WATER_VP)<1e-9&&Math.abs(modelRmsFunctionAt(MX*DX/2)[0].v-WATER_VP)<1e-9});
+  // The seabed is a real impedance boundary and must appear in the interface list.
+  const wetInterfaces=modelInterfacesAt(MX*DX/2);
+  results.push({test:'seabed appears as the first interface with the right R',
+    pass:wetInterfaces.length&&Math.abs(wetInterfaces[0].R-seabedReflectionCoefficient())<1e-9
+      &&Math.abs(wetInterfaces[0].time-(sourceWaveletDelay()+expectedWaterTime))<1e-9});
+  // A layer entirely above the seabed must contribute nothing.
+  waterDepth=Math.min(MZ*DX*.6,modelInterfaceDepth(1,Math.round(MX/2))+40);
+  const drownedColumn=modelVerticalSegmentsAt(MX*DX/2);
+  results.push({test:'units above the seabed contribute no interval',
+    pass:drownedColumn.every(segment=>segment.layerIndex!==0)});
+  environment=savedEnvironment;waterDepth=savedWaterDepth;
+  results.push({test:'switching back onshore restores the dry column exactly',
+    pass:JSON.stringify(modelVerticalSegmentsAt(MX*DX/2))===JSON.stringify(dryColumn)});
+
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};
   const badge=document.getElementById('selfTest');
@@ -3607,7 +3776,7 @@ function selfTestSummary(){return lastSelfTest;}
 
 /* init */
 ensureSolverWorker();updateSolverPathReadout();noteSavedSession();
-refreshLayerUI();updateModelPresetInfo();refreshAcquisitionModeUI();refreshReceiverControls();setup();buildCmpBins(false);refreshShotGallery();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();render();runNumericalChecks();frame();
+refreshLayerUI();updateModelPresetInfo();refreshEnvironmentUI();refreshAcquisitionModeUI();refreshReceiverControls();setup();buildCmpBins(false);refreshShotGallery();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();render();runNumericalChecks();frame();
 </script>
 </body>
 </html>

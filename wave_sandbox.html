@@ -180,6 +180,9 @@
       <input type="range" id="freq" min="8" max="60" value="25" step="1">
       <label>Record length <span id="tLbl">1.20 s</span></label>
       <input type="range" id="tmax" min="0.4" max="3" value="1.2" step="0.1">
+      <label>Random noise <span id="noiseLbl">off</span></label>
+      <input type="range" id="noiseLevel" min="0" max="120" value="0" step="5">
+      <div class="hint" id="noiseInfo">Band-limited, independent per trace, and recorded with the shot — so suppressing it is the stack's job, not the filter's.</div>
     </div>
 
     <div class="grp">
@@ -321,7 +324,7 @@
           <div class="nmo-pane"><p class="ttl">Semblance</p><canvas id="sembC" width="520" height="920"></canvas><div class="hint">velocity → · t₀ ↓</div></div>
           <div class="nmo-pane"><p class="ttl">Raw CMP</p><canvas id="nmoRaw" width="720" height="920"></canvas><div class="hint">wiggle + variable density</div></div>
           <div class="nmo-pane"><p class="ttl">NMO corrected CMP</p><canvas id="nmoCor" width="720" height="920"></canvas><div class="hint">amber = muted / invalid</div></div>
-          <div class="nmo-pane"><p class="ttl">Stack</p><canvas id="nmoStk" width="340" height="920"></canvas><div class="hint">live-fold mean</div></div>
+          <div class="nmo-pane"><p class="ttl">Stack</p><canvas id="nmoStk" width="340" height="920"></canvas><div class="hint" id="stackSnrInfo">live-fold mean</div></div>
         </div>
         <div class="analysis-grid">
           <div class="nmo-pane">
@@ -364,7 +367,7 @@
     <section id="stageFinal" class="stage">
       <div class="panel">
         <div class="toolbar">
-          <label>All-CMP velocity <select id="allVelocity"><option value="model">Model RMS at each CMP</option><option value="shared">Apply reference CMP velocity to all CMPs</option></select></label>
+          <label>All-CMP velocity <select id="allVelocity"><option value="model">Model RMS at each CMP</option><option value="field">Interpolated field from picked CMPs</option><option value="shared">Apply this CMP's picks to all CMPs</option></select></label>
           <label>Minimum fold <select id="minFold"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
           <button id="processAll" class="on">NMO + Stack All CMPs</button>
           <button id="migrateBtn">Migrate stack</button>
@@ -732,6 +735,8 @@ function finalizeShot(){
     // resetShotSimulation replaces (rather than clears) these trace arrays, so
     // the completed shot can take ownership without a second full-data copy.
     traces, dt, nt, maxAmplitude:maxAmp,
+    noise:activeReceivers.map(r=>generateTraceNoise(nt,dt,noiseSeedFor(shot.id,r.id),noiseCorners())),
+    signalRms:signalRmsOfShot(traces),
     status:'complete'
   };
   const old=shotRecords.findIndex(r=>r.id===record.id);
@@ -755,12 +760,27 @@ function buildTraceDatabase(){
     // any of them knowing a filter exists. `rawSamples` is kept for the
     // before/after spectrum display.
     const raw=shot.traces[k];
+    const doFilter=filterEnabled&&validFilterCorners(filterCorners);
+    const noiseAmplitude=noiseLevel*(shot.signalRms||0);
+    const noiseSource=noiseAmplitude>0&&shot.noise?shot.noise[k]:null;
+    let unfiltered=raw,noiseRaw=null;
+    if(noiseSource){
+      noiseRaw=new Float32Array(shot.nt);unfiltered=new Float32Array(shot.nt);
+      for(let i=0;i<shot.nt;i++){noiseRaw[i]=noiseSource[i]*noiseAmplitude;unfiltered[i]=raw[i]+noiseRaw[i];}
+    }
+    const cleanPart=doFilter?bandpassFilter(raw,shot.dt,filterCorners):raw;
+    const noisePart=noiseRaw?(doFilter?bandpassFilter(noiseRaw,shot.dt,filterCorners):noiseRaw):null;
+    let samples=cleanPart;
+    if(noisePart){
+      samples=new Float32Array(shot.nt);
+      for(let i=0;i<shot.nt;i++)samples[i]=cleanPart[i]+noisePart[i];
+    }
     acquisitionTraces.push({
       shotId:shot.id, receiverId:receiver.id,
       sourceI:shot.sourceI, sourceX, receiverI:receiver.i, receiverX,
       midpointX, sourceReceiverOffset, halfOffset:sourceReceiverOffset/2,
-      rawSamples:raw,
-      samples:filterEnabled&&validFilterCorners(filterCorners)?bandpassFilter(raw,shot.dt,filterCorners):raw,
+      rawSamples:unfiltered, noiseSamples:noisePart,
+      samples,
       dt:shot.dt, nt:shot.nt
     });
   }));
@@ -1151,6 +1171,65 @@ function bandpassFilter(samples,dt,corners){
   return out;
 }
 
+/* ---------------- recorded noise ---------------- */
+/* Without noise the CMP method cannot justify itself: stacking exists to raise
+   signal above what is NOT repeatable between traces, and clean synthetics have
+   nothing to suppress. Each trace therefore carries its own independent noise
+   realisation, which is what makes the stack's suppression real rather than
+   asserted.
+
+   Two properties matter. The noise is BAND-LIMITED to roughly the signal band,
+   so it cannot simply be filtered away -- removing it is the stack's job. And
+   it is DETERMINISTIC: Math.random would make every acquisition irreproducible,
+   so each trace draws from its own stream seeded on the shot and receiver ids,
+   and the same survey always yields the same noise. */
+let noiseLevel=0;
+
+function mulberry32(seed){
+  let a=seed>>>0;
+  return function(){
+    a=(a+0x6D2B79F5)>>>0;
+    let t=Math.imul(a^(a>>>15),1|a);
+    t=(t+Math.imul(t^(t>>>7),61|t))^t;
+    return ((t^(t>>>14))>>>0)/4294967296;
+  };
+}
+
+function noiseSeedFor(shotId,receiverId){return (Math.imul(shotId,73856093)^Math.imul(receiverId,19349663))>>>0;}
+function noiseCorners(){return [.3*f0,.5*f0,2*f0,3*f0];}
+
+/* Unit-RMS band-limited noise, so the level control means the same thing at any
+   dominant frequency. Box-Muller rather than the raw uniform stream: uniform
+   noise has the wrong tails and reads as buzz instead of noise. */
+function generateTraceNoise(sampleCount,dt,seed,corners){
+  const rand=mulberry32(seed),white=new Float32Array(sampleCount);
+  for(let i=0;i<sampleCount;i++){
+    const u=Math.max(1e-12,rand()),v=rand();
+    white[i]=Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+  }
+  const shaped=bandpassFilter(white,dt,corners);
+  let sum=0;for(let i=0;i<sampleCount;i++)sum+=shaped[i]*shaped[i];
+  const rms=Math.sqrt(sum/Math.max(1,sampleCount));
+  if(rms>0)for(let i=0;i<sampleCount;i++)shaped[i]/=rms;
+  return shaped;
+}
+
+function rmsOf(samples,from=0,to=samples.length){
+  let sum=0,n=0;
+  for(let i=from;i<to;i++){sum+=samples[i]*samples[i];n++;}
+  return n?Math.sqrt(sum/n):0;
+}
+
+/* The level is expressed against the shot's own signal RMS, so "40%" means the
+   same thing whether the model is loud or quiet. */
+function signalRmsOfShot(traceList){
+  let sum=0,n=0;
+  traceList.forEach(tr=>{for(let i=0;i<tr.length;i++){sum+=tr[i]*tr[i];n++;}});
+  return n?Math.sqrt(sum/n):0;
+}
+
+function noiseSnrDb(){return noiseLevel>0?20*Math.log10(1/noiseLevel):Infinity;}
+
 let filterEnabled=false,filterCorners=[5,10,45,60];
 function validFilterCorners(c){return c.length===4&&c.every(v=>Number.isFinite(v)&&v>=0)&&c[0]<c[1]&&c[1]<c[2]&&c[2]<c[3];}
 
@@ -1487,8 +1566,49 @@ function computeSemblance(){
 /* Velocity picks: a list of (t0, v) control points defining v(t0). When picks
    exist they override the constant-velocity slider; between picks the function
    is linearly interpolated, and it is held constant beyond the ends. */
-let picks = [];                  // [{t0, v}] kept sorted by t0
+let picks = [];                  // picks for the CMP currently on screen, sorted by t0
+
+/* Velocity picks belong to a LOCATION, not to the survey. Real velocity
+   analysis means picking at intervals along the line and interpolating a
+   v(x, t) field between the picked positions; a single function applied
+   everywhere can only be right where it was picked. `picks` stays as the
+   working set for the CMP on screen, and pickSets is the record of every
+   location picked so far, keyed by CMP index. */
+let pickSets = new Map();
 let velocitySource='manual';
+
+function storePicksForSelectedCmp(){
+  if(selectedCmpIndex===null)return;
+  if(picks.length)pickSets.set(selectedCmpIndex,picks.map(pick=>({t0:pick.t0,v:pick.v})));
+  else pickSets.delete(selectedCmpIndex);
+}
+
+function loadPicksForSelectedCmp(){
+  const stored=selectedCmpIndex===null?null:pickSets.get(selectedCmpIndex);
+  picks=stored?stored.map(pick=>({t0:pick.t0,v:pick.v})):[];
+}
+
+function pickedCmpIndices(){
+  return [...pickSets.keys()].filter(index=>(pickSets.get(index)||[]).length).sort((a,b)=>a-b);
+}
+
+/* The interpolated field. Between two picked locations the velocity at a given
+   t0 is blended linearly in midpoint distance; outside the picked range the
+   nearest picked function is held constant rather than extrapolated, which is
+   the conservative choice at the ends of a line. */
+function pickedVelocityField(){
+  const located=pickedCmpIndices();
+  if(!located.length)return null;
+  return (t0,index)=>{
+    if(index<=located[0])return interpolateVelocity(pickSets.get(located[0]),t0,vnmo);
+    const last=located[located.length-1];
+    if(index>=last)return interpolateVelocity(pickSets.get(last),t0,vnmo);
+    let k=0;while(k+1<located.length&&located[k+1]<index)k++;
+    const lo=located[k],hi=located[k+1],w=(index-lo)/Math.max(1e-9,hi-lo);
+    const vLo=interpolateVelocity(pickSets.get(lo),t0,vnmo),vHi=interpolateVelocity(pickSets.get(hi),t0,vnmo);
+    return vLo+(vHi-vLo)*w;
+  };
+}
 let selectedHyperbolaT0=.45;
 let hyperbolaSnapInfo=null;
 
@@ -1775,9 +1895,12 @@ function drawSemb(){
 }
 
 function refreshPickList(){
-  const el=document.getElementById('pickList');
-  if(!picks.length){ el.textContent=''; return; }
-  el.textContent='Picks: '+picks.map(p=>`${p.t0.toFixed(2)}s→${Math.round(p.v)}`).join(', ');
+  const el=document.getElementById('pickList'),located=pickedCmpIndices();
+  const here=picks.length?'Picks here: '+picks.map(p=>`${p.t0.toFixed(2)}s→${Math.round(p.v)}`).join(', '):'No picks at this CMP.';
+  const field=located.length
+    ? ` · field spans ${located.length} picked CMP${located.length===1?'':'s'} at ${located.map(index=>(cmpOrigin+index*cmpBinSize).toFixed(0)).join(', ')} m`
+    : ' · pick at two or more CMPs to build an interpolated field';
+  el.textContent=here+field;
 }
 
 /* picking interaction */
@@ -1806,6 +1929,7 @@ sembCan.addEventListener('click',e=>{
     const manualRadio=document.querySelector('input[name="velocitySource"][value="manual"]');
     if(manualRadio) manualRadio.checked=true;
   }
+  storePicksForSelectedCmp();
   refreshPickList(); drawNmo(); updateFlow();
 });
 /* ---------------- constant-velocity stacks ---------------- */
@@ -1836,6 +1960,73 @@ function cvsPanels(){
   if(cvsCacheKey===key&&cvsCache)return cvsCache;
   cvsCacheKey=key;cvsCache=constantVelocityStacks(records,sembVmin,sembVmax);
   return cvsCache;
+}
+
+/* Measured proof that stacking suppresses noise.
+   The noise component of every trace is carried alongside the composite, so the
+   same NMO and mute can be applied to the signal-only and noise-only versions
+   of the gather and each stacked separately. Comparing the two ratios turns
+   "stacking improves signal-to-noise" from an assertion into a number, next to
+   the sqrt(fold) figure theory predicts. */
+function stackSnrReport(){
+  const records=selectedCmpTraces();
+  if(!records.length||!noiseLevel||!records[0].noiseSamples)return null;
+  const cleanRecords=records.map(record=>{
+    const clean=new Float32Array(record.nt),noise=record.noiseSamples;
+    for(let i=0;i<record.nt;i++)clean[i]=record.samples[i]-noise[i];
+    return {...record,samples:clean};
+  });
+  const noiseRecords=records.map(record=>({...record,samples:record.noiseSamples}));
+  const cleanResult=applyNMO(cleanRecords),noiseResult=applyNMO(noiseRecords);
+  const cleanStack=stackOf(cleanResult),noiseStack=stackOf(noiseResult);
+  if(!cleanStack||!noiseStack)return null;
+
+  /* Signal and noise must be compared over the SAME support, or the answer is
+     meaningless: a muted trace holds zeros where the stack is still live, which
+     inflates the stack's RMS against the traces' and reports a coherence above
+     1 (physically impossible for a mean). Restricting to full-fold samples
+     would be exact but leaves almost nothing once the stretch mute bites, so
+     the comparison is made per sample against only the traces live there.
+     The two mask sets are identical by construction -- applyNMO's validity
+     depends on geometry, velocity and the mutes, never on sample values -- so
+     the clean and noise gathers mute in lockstep. */
+  let stackSignal2=0,stackNoise2=0,traceSignal2=0,traceNoise2=0,foldSum=0,liveSamples=0;
+  for(let a=0;a<cleanStack.nt;a++){
+    const live=cleanStack.liveFold[a];
+    if(live<2)continue;
+    let signal2=0,noise2=0;
+    for(let k=0;k<records.length;k++){
+      if(!cleanResult.valid[k][a])continue;
+      const sv=cleanResult.correctedRecords[k].samples[a],nv=noiseResult.correctedRecords[k].samples[a];
+      signal2+=sv*sv;noise2+=nv*nv;
+    }
+    traceSignal2+=signal2/live;traceNoise2+=noise2/live;
+    stackSignal2+=cleanStack.samples[a]*cleanStack.samples[a];
+    stackNoise2+=noiseStack.samples[a]*noiseStack.samples[a];
+    foldSum+=live;liveSamples++;
+  }
+  if(liveSamples<40||traceSignal2<=0||traceNoise2<=0||stackNoise2<=0||stackSignal2<=0)return null;
+  const meanLiveFold=foldSum/liveSamples;
+  /* Compared against the MEAN trace, not the best one: the near-offset trace
+     has the least spreading loss and the highest SNR in the gather, so
+     measuring against it would understate what stacking bought. */
+  const traceSignal=Math.sqrt(traceSignal2/liveSamples),traceNoise=Math.sqrt(traceNoise2/liveSamples);
+  const stackSignal=Math.sqrt(stackSignal2/liveSamples),stackNoise=Math.sqrt(stackNoise2/liveSamples);
+
+  /* The gain decomposes into two independent factors, and separating them is
+     the point of the readout:
+       noise reduction - averaging N independent realisations divides noise RMS
+         by sqrt(N), and this part is pure arithmetic;
+       signal coherence - the mean only preserves signal amplitude if the events
+         are actually aligned. A wrong stacking velocity leaves residual moveout,
+         the traces partly cancel, and coherence falls below 1.
+     So the shortfall against sqrt(fold) is a direct measure of how good the
+     velocity pick was, which is why the two are reported apart. */
+  const coherence=stackSignal/traceSignal;
+  const noiseReduction=traceNoise/stackNoise;
+  const traceSnr=20*Math.log10(traceSignal/traceNoise),stackSnr=20*Math.log10(stackSignal/stackNoise);
+  return {traceSnr,stackSnr,gain:stackSnr-traceSnr,coherence,noiseReduction,
+          meanLiveFold,theoretical:Math.sqrt(Math.max(1,meanLiveFold)),fold:records.length};
 }
 
 function drawConstantVelocityStacks(){
@@ -1985,7 +2176,8 @@ function drawNmo(){
   if(!records.length){
     [document.getElementById('nmoRaw'),document.getElementById('nmoCor'),document.getElementById('nmoStk')].forEach(cv=>drawTraceGather(cv,[],{empty:'Build and select a CMP'}));
     sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);
-    drawConstantVelocityStacks();drawDixPanel();return;
+    drawConstantVelocityStacks();drawDixPanel();
+    document.getElementById('stackSnrInfo').textContent='live-fold mean';return;
   }
   ensureSemblance();drawSemb();
   const result=nmoTraces(),stack=stackOf(result),midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,displayAmax=robustGatherAmplitude(records),activeVelocity=vAt(selectedHyperbolaT0,midpointX);
@@ -2003,6 +2195,12 @@ function drawNmo(){
   const exactText=!showExactMoveout?'gold model curve off':modelHasLateralVariation()?'gold exact curve unavailable for laterally varying interfaces':'gold = exact layered-model reference';
   document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span>`;
   drawConstantVelocityStacks();drawDixPanel();
+  const snr=stackSnrReport(),snrEl=document.getElementById('stackSnrInfo');
+  snrEl.innerHTML=snr
+    ?`SNR <b>${snr.traceSnr.toFixed(1)} dB</b> mean trace &rarr; <b>${snr.stackSnr.toFixed(1)} dB</b> stacked · gain <b>${snr.gain>=0?'+':''}${snr.gain.toFixed(1)} dB</b>`+
+     `<br>noise &divide;${snr.noiseReduction.toFixed(2)} — &radic;fold predicts &divide;${snr.theoretical.toFixed(2)} at mean live fold ${snr.meanLiveFold.toFixed(1)}`+
+     `<br>signal coherence <b>${snr.coherence.toFixed(2)}</b> — 1.00 means NMO aligned the events perfectly`
+    :(noiseLevel?'live-fold mean · rebuild CMP gathers to measure SNR':'live-fold mean · add random noise to measure the stack&rsquo;s SNR gain');
   document.getElementById('nmoInfo').textContent=(liveMute?`Top mute ON: input times before ${liveMute.t0.toFixed(2)} s + |offset| / ${liveMute.velocity} m/s are removed before NMO, semblance and stack. `:'Top mute OFF: the direct arrival still stacks into the section. ')+
     (stretchLimit===null?'Stretch mute is OFF.':`Muted because NMO stretch > ${Math.round(stretchLimit*100)}%; shaded samples are invalid and excluded from live fold.`)+
     (modelHasLateralVariation()?' Model RMS is only a teaching reference for laterally varying reflectors; DMO/migration would be required.':'');
@@ -2019,6 +2217,7 @@ document.getElementById('cvsCanvas').addEventListener('click',e=>{
   picks.push({t0:selectedHyperbolaT0,v:velocity});
   picks.sort((a,b)=>a.t0-b.t0);
   velocitySource='manual';document.querySelector('input[name="velocitySource"][value="manual"]').checked=true;
+  storePicksForSelectedCmp();
   document.getElementById('cvsInfo').textContent=`Picked ${velocity.toFixed(0)} m/s at t₀ ${selectedHyperbolaT0.toFixed(3)} s. Move the t₀ line on the raw CMP and pick again to build v(t).`;
   refreshPickList();drawNmo();updateFlow();
 });
@@ -2277,7 +2476,9 @@ function frame(now=performance.now()){
 /* ---------------- sorting, lineage and final section ---------------- */
 function selectCmp(index,showStage=null){
   if(!cmpBins.has(index))return;
+  storePicksForSelectedCmp();
   selectedCmpIndex=index;selectedTraceKey=null;hyperbolaSnapInfo=null;sembDirty=true;
+  loadPicksForSelectedCmp();refreshPickList();
   drawCmpViews();drawAcquisitionViews();refreshShotGallery();render();
   if(showStage)setStage(showStage);
 }
@@ -2302,6 +2503,9 @@ function drawCmpFoldCanvas(cv,{compact=false}={}){
   for(let i=0;i<count;i++){
     const k=min+i,fold=cmpBins.get(k)?.length||0,x=L+i/count*pw,w=Math.max(1,pw/count),h=fold/maxFold*ph;
     ctx.fillStyle=k===selectedCmpIndex?'#ffc857':fold?'#4da3ff':'#252c35';ctx.fillRect(x,T+ph-h,Math.max(1,w-1),h);
+    // a tick under any bin that carries velocity picks, so picking coverage
+    // along the line is visible while choosing where to pick next
+    if((pickSets.get(k)||[]).length){ctx.fillStyle='#7dff9b';ctx.fillRect(x,T+ph+2,Math.max(1.5,w-1),3);}
     if(k===selectedCmpIndex){ctx.strokeStyle='#ffe4a2';ctx.lineWidth=2;ctx.strokeRect(x+.5,T+ph-h+.5,Math.max(1,w-2),Math.max(1,h-1));ctx.strokeStyle='#232a33';ctx.lineWidth=1;}
   }
   ctx.fillStyle='#8a949f';ctx.fillText(`Fold 0–${maxFold}`,compact?3:L,compact?13:18);
@@ -2415,17 +2619,25 @@ installTracePicker(document.getElementById('cmpGather'));
 function processAllCMPs(){
   if(!cmpBins.size){document.getElementById('finalInfo').textContent='Build CMP gathers first.';return;}
   stopFinalFlip(true);finalView='stack';finalDataView='stack';updateFinalViewControls();
+  storePicksForSelectedCmp();
   const mode=document.getElementById('allVelocity').value,minFold=+document.getElementById('minFold').value;
+  const field=pickedVelocityField();
+  if(mode==='field'&&!field){document.getElementById('finalInfo').textContent='No velocity picks yet — pick on the semblance panel at one or more CMPs, or choose a different velocity source.';return;}
   finalStacks=new Map();migratedStacks=new Map();finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
   keys.forEach(index=>{
     const records=cmpBins.get(index);if(records.length<minFold)return;
     const center=cmpOrigin+index*cmpBinSize;
-    const velocityFunction=mode==='model'?(t0)=>modelVAt(t0,center):(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
+    const velocityFunction=mode==='model'?(t0)=>modelVAt(t0,center)
+      :mode==='field'&&field?(t0)=>field(t0,index)
+      :(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
     const result=applyNMO(records,velocityFunction,stretchLimit),stack=stackOf(result);
     finalStacks.set(index,{index,center,fold:records.length,stack});
   });
   finalRange={min:keys[0],max:keys[keys.length-1],minFold,mode};drawFinalSection();updateFlow();
-  const velocitySummary=mode==='model'?'time-varying Model RMS at each midpoint':(picks.length?'reference CMP picked velocity':'constant velocity fallback (no reference picks)');
+  const located=pickedCmpIndices();
+  const velocitySummary=mode==='model'?'time-varying Model RMS at each midpoint'
+    :mode==='field'?`interpolated field from ${located.length} picked CMP${located.length===1?'':'s'}`
+    :(picks.length?"this CMP's picks applied everywhere":'constant velocity fallback (no picks)');
   document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}. Blank columns are not interpolated.`;
 }
 
@@ -2485,8 +2697,10 @@ let migratedStacks=new Map(),migrationAperture=800,finalDataView='stack';
 
 function migrationVelocityFunction(){
   const mode=document.getElementById('allVelocity').value;
+  const field=mode==='field'?pickedVelocityField():null;
   return mode==='model'
     ?(t0,index)=>modelVAt(t0,cmpOrigin+index*cmpBinSize)
+    :field?(t0,index)=>field(t0,index)
     :(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
 }
 
@@ -2672,7 +2886,9 @@ function collectSessionState(){
     nextShotId,selectedShotId,
     acquisition:{mode:acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide,
       topBoundary,f0,tmax,simulationSpeed},
-    processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),velocitySource,vnmo,stretchLimit,
+    processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),
+      pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
+      noiseLevel,velocitySource,vnmo,stretchLimit,
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
@@ -2733,6 +2949,16 @@ function applySessionState(state){
   cmpBinSize=clampNumber(proc.cmpBinSize,cmpBinSize,5,500);
   picks=Array.isArray(proc.picks)?proc.picks.filter(pick=>Number.isFinite(+pick.t0)&&Number.isFinite(+pick.v))
     .map(pick=>({t0:clampNumber(pick.t0,0,0,tmax),v:clampNumber(pick.v,2000,200,12000)})).sort((a,b)=>a.t0-b.t0):[];
+  pickSets=new Map();
+  if(Array.isArray(proc.pickSets))proc.pickSets.forEach(entry=>{
+    if(!Array.isArray(entry)||entry.length!==2)return;
+    const index=+entry[0];
+    if(!Number.isFinite(index)||!Array.isArray(entry[1]))return;
+    const list=entry[1].filter(pick=>pick&&Number.isFinite(+pick.t0)&&Number.isFinite(+pick.v))
+      .map(pick=>({t0:clampNumber(pick.t0,0,0,tmax),v:clampNumber(pick.v,2000,200,12000)})).sort((a,b)=>a.t0-b.t0);
+    if(list.length)pickSets.set(index,list);
+  });
+  noiseLevel=clampNumber(proc.noiseLevel,noiseLevel,0,2);
   velocitySource=pickFrom(proc.velocitySource,['constant','manual','model'],velocitySource);
   vnmo=clampNumber(proc.vnmo,vnmo,1200,6000);
   stretchLimit=proc.stretchLimit===null?null:clampNumber(proc.stretchLimit,stretchLimit,0,4);
@@ -2751,7 +2977,12 @@ function applySessionState(state){
   wavefieldBoost=!!disp.wavefieldBoost;
 
   syncControlsFromState(proc);
+  // clearAcquisitionRecords drops every derived product, velocity picks
+  // included -- correct when a user clears data, wrong here: a session restore
+  // is not a data clear, so the picked field is put back afterwards.
+  const restoredPicks=picks,restoredPickSets=pickSets;
   clearAcquisitionRecords();
+  picks=restoredPicks;pickSets=restoredPickSets;
   refreshLayerUI();refreshAcquisitionModeUI();refreshReceiverControls();refreshPickList();
   setup();drawCmpViews();drawFinalSection();updateFlow();render();
   return true;
@@ -2764,7 +2995,7 @@ function syncControlsFromState(proc){
   set('topBoundary',topBoundary);set('acqMode',acquisitionMode);
   set('stCh',streamerChannels);set('stDx',streamerSpacing);set('stNear',streamerNearOffset);set('stSide',streamerSide);
   set('vnmo',vnmo);set('nmoGain',nmoDisplayGain);set('migAperture',migrationAperture);
-  set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);
+  set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);set('noiseLevel',Math.round(noiseLevel*100));
   set('stretchMute',stretchLimit===null?'off':String(stretchLimit));
   [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
   if(proc&&proc.minFold)set('minFold',proc.minFold);
@@ -2779,6 +3010,7 @@ function syncControlsFromState(proc){
   document.getElementById('nmoGainLbl').textContent=nmoDisplayGain.toFixed(1)+'×';
   document.getElementById('muteT0Lbl').textContent=topMuteT0.toFixed(2)+' s';
   document.getElementById('muteVelLbl').textContent=topMuteVelocity+' m/s';
+  document.getElementById('noiseLbl').textContent=describeNoise();
 }
 
 function sessionMessage(text,warn=false){
@@ -2909,7 +3141,7 @@ function clearAcquisitionRecords(){
   // Every derived product goes with the records, migration included -- leaving
   // it behind would show a migrated section belonging to data that is gone.
   finalStacks.clear();migratedStacks.clear();finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
-  semb=null;sembDirty=true;cvsCache=null;
+  semb=null;sembDirty=true;cvsCache=null;pickSets=new Map();picks=[];
   activeShotId=null;setup();document.getElementById('pauseAcq').textContent='Pause';document.getElementById('acqProgress').style.width='0%';
   document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; run an acquisition to measure achieved speed. Solver dt and recorded traces are unchanged.`;
   refreshShotGallery();refreshReceiverControls();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();
@@ -3015,6 +3247,15 @@ function applySourceCountPreset(count){
 }
 document.querySelectorAll('[data-source-count]').forEach(button=>button.onclick=()=>applySourceCountPreset(+button.dataset.sourceCount));
 document.getElementById('showRays').onchange=e=>{wavefieldBoost=e.target.checked;render();};
+function describeNoise(){return noiseLevel?`${Math.round(noiseLevel*100)}% · SNR ${noiseSnrDb().toFixed(1)} dB`:'off';}
+document.getElementById('noiseLevel').oninput=e=>{
+  noiseLevel=Math.max(0,(+e.target.value||0)/100);
+  document.getElementById('noiseLbl').textContent=describeNoise();
+};
+document.getElementById('noiseLevel').onchange=()=>{
+  if(!shotRecords.length){document.getElementById('stat').textContent='Noise level set; acquire shots to apply it.';return;}
+  rebuildFilteredDatabase(noiseLevel?`Noise at ${Math.round(noiseLevel*100)}% of signal RMS (SNR ${noiseSnrDb().toFixed(1)} dB)`:'Noise removed');
+};
 document.getElementById('sessionSave').onclick=saveSessionToStorage;
 document.getElementById('sessionRestore').onclick=restoreSessionFromStorage;
 document.getElementById('sessionExport').onclick=exportSessionFile;
@@ -3163,9 +3404,20 @@ document.getElementById('vAutoPick').onclick=()=>{
     for(let ai=a0;ai<a1;ai++)for(let vi=0;vi<SEMB_NV;vi++){const s=semb[ai*SEMB_NV+vi];sum+=s;cnt++;if(s>bs){bs=s;bvi=vi;bai=ai;}}
     const bg=cnt?sum/cnt:0;if(bvi>=0&&bs>3*bg&&bs>.12*sembMax)cand.push({t0:bai/sembNT*tmax,v:sembVmin+bvi/(SEMB_NV-1)*(sembVmax-sembVmin),s:bs});}
   cand.sort((a,b)=>a.t0-b.t0);picks=[];const mergeDt=.15*tmax;for(const c of cand){const prev=picks[picks.length-1];if(prev&&c.t0-prev.t0<mergeDt){if(c.s>prev.s)picks[picks.length-1]=c;}else picks.push(c);}picks=picks.map(p=>({t0:p.t0,v:p.v}));velocitySource='manual';document.querySelector('input[name="velocitySource"][value="manual"]').checked=true;
-  info.textContent=picks.length?`Auto-picked ${picks.length} point${picks.length>1?'s':''}. Click to refine.`:'No clear semblance peaks found — pick manually.';refreshPickList();drawNmo();updateFlow();
+  storePicksForSelectedCmp();
+  info.textContent=picks.length?`Auto-picked ${picks.length} point${picks.length>1?'s':''} at CMP ${selectedCmpIndex}. Move to another CMP and pick again to build a field.`:'No clear semblance peaks found — pick manually.';refreshPickList();drawNmo();updateFlow();
 };
-document.getElementById('vClear').onclick=()=>{picks=[];refreshPickList();document.getElementById('nmoInfo').textContent='Manual picks cleared; manual mode falls back to constant velocity.';drawNmo();updateFlow();};
+document.getElementById('vClear').onclick=e=>{
+  if(e.shiftKey){
+    pickSets=new Map();picks=[];
+    document.getElementById('nmoInfo').textContent='Cleared picks at every CMP.';
+  }else{
+    picks=[];storePicksForSelectedCmp();
+    const remaining=pickedCmpIndices().length;
+    document.getElementById('nmoInfo').textContent=`Cleared picks at this CMP; ${remaining} other picked location${remaining===1?'':'s'} kept. Shift-click to clear all.`;
+  }
+  refreshPickList();drawNmo();updateFlow();
+};
 document.getElementById('vnmo').oninput=e=>{vnmo=+e.target.value;document.getElementById('vLbl').textContent=vnmo+' m/s';drawNmo();};
 document.getElementById('nmoGain').oninput=e=>{nmoDisplayGain=+e.target.value;document.getElementById('nmoGainLbl').textContent=nmoDisplayGain.toFixed(1)+'×';drawNmo();};
 document.getElementById('nmoDensity').onchange=e=>{nmoDensity=e.target.checked;drawNmo();};
@@ -3304,6 +3556,41 @@ function runNumericalChecks(){
   results.push({test:'session state survives a save/load round-trip',pass:sessionRoundTrip});
   results.push({test:'malformed session import is rejected, not applied',
     pass:(()=>{try{applySessionState({layers:'not-an-array'});return false;}catch(err){return true;}})()});
+
+  // --- recorded noise -----------------------------------------------------
+  const noiseCornersTest=[8,15,60,90];
+  const noiseA=generateTraceNoise(2048,.002,4242,noiseCornersTest);
+  const noiseB=generateTraceNoise(2048,.002,4242,noiseCornersTest);
+  const noiseC=generateTraceNoise(2048,.002,777,noiseCornersTest);
+  let noiseIdentical=true,noiseDiffers=false;
+  for(let i=0;i<2048;i++){if(noiseA[i]!==noiseB[i])noiseIdentical=false;if(noiseA[i]!==noiseC[i])noiseDiffers=true;}
+  results.push({test:'trace noise is deterministic per seed and differs between seeds',pass:noiseIdentical&&noiseDiffers});
+  results.push({test:'trace noise is normalised to unit RMS',pass:Math.abs(rmsOf(noiseA)-1)<.02});
+  // The property the whole CMP method rests on: averaging N independent
+  // realisations divides noise RMS by sqrt(N).
+  const noiseStackCount=25,noiseSum=new Float64Array(2048);
+  for(let k=0;k<noiseStackCount;k++){
+    const trace=generateTraceNoise(2048,.002,9000+k,noiseCornersTest);
+    for(let i=0;i<2048;i++)noiseSum[i]+=trace[i];
+  }
+  let noiseAcc=0;
+  for(let i=0;i<2048;i++){const v=noiseSum[i]/noiseStackCount;noiseAcc+=v*v;}
+  const stackedNoiseRms=Math.sqrt(noiseAcc/2048);
+  results.push({test:'stacking N independent noise traces divides noise RMS by √N',
+    pass:Math.abs(stackedNoiseRms-1/Math.sqrt(noiseStackCount))<.04});
+
+  // --- interpolated velocity field ---------------------------------------
+  const savedPickSets=pickSets;
+  pickSets=new Map([[10,[{t0:0,v:2000},{t0:1,v:2000}]],[20,[{t0:0,v:3000},{t0:1,v:3000}]]]);
+  const testField=pickedVelocityField();
+  const fieldMid=testField(.5,15),fieldLo=testField(.5,10),fieldHi=testField(.5,20);
+  const fieldBeyondLo=testField(.5,2),fieldBeyondHi=testField(.5,40);
+  const fieldQuarter=testField(.5,12.5);
+  pickSets=savedPickSets;
+  results.push({test:'velocity field interpolates linearly between picked CMPs',
+    pass:Math.abs(fieldLo-2000)<1e-9&&Math.abs(fieldHi-3000)<1e-9&&Math.abs(fieldMid-2500)<1e-9&&Math.abs(fieldQuarter-2250)<1e-9});
+  results.push({test:'velocity field holds, not extrapolates, beyond the picked range',
+    pass:Math.abs(fieldBeyondLo-2000)<1e-9&&Math.abs(fieldBeyondHi-3000)<1e-9});
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

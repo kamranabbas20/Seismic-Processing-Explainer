@@ -252,6 +252,11 @@
     </div>
 
     <section id="stageAcquisition" class="stage on">
+      <div class="panel" style="margin-bottom:12px">
+        <p class="ttl">Survey schematic — what is being recorded right now</p>
+        <canvas id="acqSchematic" class="wide" width="1040" height="158" aria-label="Live survey schematic showing the shot line and the spread the active shot records into"></canvas>
+        <div class="hint" id="acqSchematicInfo">Add shots and receivers, then run acquisition.</div>
+      </div>
       <div class="stage-grid">
         <div class="panel model-panel">
           <p class="ttl">Velocity model, wavefield &amp; surface geometry</p>
@@ -728,6 +733,18 @@ const solverChannel=new MessageChannel();
 let nmoDisplayGain=2.5,nmoDensity=true,showExactMoveout=true;
 let wavefieldBoost=false;
 let workerActive=false;
+/* Stepping continues past the last recorded sample of the FINAL shot so the
+   wavefield drains into the sponge rather than freezing mid-flight. Two numbers
+   drive it: how many steps this shot runs in total, and the step at which
+   recording stopped. */
+let stepsThisShot=0,settleFrom=0,wavefieldReference=0;
+const SETTLE_SECONDS=.45;
+function settleSteps(){return dt>0?Math.round(SETTLE_SECONDS/dt):0;}
+function isSettling(){return (running||paused)&&settleFrom>0&&it>settleFrom;}
+function settleProgress(){
+  const span=stepsThisShot-settleFrom;
+  return span>0?Math.max(0,Math.min(1,(it-settleFrom)/span)):1;
+}
 /* A perfectly reflecting (p = 0) top row is a free surface: it returns R = -1
    and therefore generates the source ghost and free-surface multiples that
    dominate real records. Switching it to a first-order Mur absorbing condition
@@ -795,6 +812,7 @@ function setup(){
   syncActiveReceivers();
   traces = activeReceivers.map(()=> new Float32Array(nt));
   it=0; maxAmp=1e-9; sembDirty=true;
+  stepsThisShot=nt; settleFrom=nt; wavefieldReference=0;
   rebuildFdState();
 }
 
@@ -807,12 +825,15 @@ function resetShotSimulation(){
   syncActiveReceivers();
   traces=activeReceivers.map(()=>new Float32Array(nt));
   it=0;maxAmp=1e-9;sembDirty=true;
+  stepsThisShot=nt; settleFrom=nt; wavefieldReference=0;
   rebuildFdState();
 }
 
 function initializeShotSimulation(shot){
   src={i:shot.i,j:SURF}; activeShotId=shot.id;
   resetShotSimulation();
+  // Only the last shot settles; the others cut straight to the next source.
+  if(queueIndex>=acquisitionQueue.length-1)stepsThisShot=nt+settleSteps();
   document.getElementById('activeShotInfo').textContent=
     `Shot ${queueIndex+1} of ${acquisitionQueue.length} · S${shot.id} · x = ${(shot.i*DX).toFixed(0)} m`;
 }
@@ -966,15 +987,20 @@ function fdKernel(state){
   // Causal Ricker, inlined so the kernel stays free of outer bindings.
   const phase=Math.PI*state.f0*(state.it*state.dt-1.1/state.f0),phase2=phase*phase;
   next[state.srcIdx]+=(1-2*phase2)*Math.exp(-phase2)*3e4;
-  const recIdx=state.recIdx,traces=state.traces;
-  let maxAmp=state.maxAmp;
-  for(let n=0;n<recIdx.length;n++){
-    const v=next[recIdx[n]];
-    traces[n][state.it]=v;
-    const m=v<0?-v:v;
-    if(m>maxAmp)maxAmp=m;
+  // Recording stops when the trace is full, but stepping may continue: after
+  // the last shot the field is allowed to keep propagating so its energy
+  // actually leaves through the sponge instead of freezing mid-flight.
+  if(state.it<state.recordUntil){
+    const recIdx=state.recIdx,traces=state.traces;
+    let maxAmp=state.maxAmp;
+    for(let n=0;n<recIdx.length;n++){
+      const v=next[recIdx[n]];
+      traces[n][state.it]=v;
+      const m=v<0?-v:v;
+      if(m>maxAmp)maxAmp=m;
+    }
+    state.maxAmp=maxAmp;
   }
-  state.maxAmp=maxAmp;
   state.p0=current;state.p1=next;state.p2=previous;
   state.it++;
 }
@@ -990,7 +1016,7 @@ function rebuildFdState(){
   fdState={c:fdCenter,q:fdPrevious,xp:fdXp,xm:fdXm,zp:fdZp,zm:fdZm,
     NX,NZ,OX,MX,DX,dt,f0,topVp:vp.subarray(0,NX),
     freeSurface:topBoundary==='free',
-    srcIdx:simIdx(src.i,src.j),recIdx,traces,
+    srcIdx:simIdx(src.i,src.j),recIdx,traces,recordUntil:nt,
     p0,p1,p2,it,maxAmp};
 }
 
@@ -1020,6 +1046,15 @@ const wfCtx = wfTmp.getContext('2d');
    drawModel keeps a single code path either way. */
 const wfFrame=new Float32Array(MX*MZ);
 let wfFrameLive=false;
+/* Acquisition is over, so the panel is no longer showing a live field. The
+   pressure history is scratch for the next shot -- resetShotSimulation zeroes
+   it anyway -- so clearing it here simply stops a spent wavefield lingering. */
+function clearWavefieldDisplay(){
+  if(p0){p0.fill(0);p1.fill(0);p2.fill(0);}
+  wfFrame.fill(0);wfFrameLive=false;
+  settleFrom=0;wavefieldReference=0;
+}
+
 function captureWavefieldFrame(){
   if(workerActive)return wfFrameLive;
   if(!p1)return false;
@@ -1084,7 +1119,18 @@ function drawModel(){
     // not dim the model-wide wavefield display for interior shots.
     let wavefieldAmp=1e-9;
     for(let j=0;j<MZ;j+=2) for(let i=0;i<MX;i+=2) wavefieldAmp=Math.max(wavefieldAmp,Math.abs(wfFrame[j*MX+i]));
-    const scale = 1/wavefieldAmp;
+    /* Per-frame normalisation is what made the leftover field look as strong as
+       the wavefront: however weak it got, it was redrawn at full brightness.
+       While settling the scale is pinned to the amplitude at the moment
+       recording stopped, so the decay reads as a decay. */
+    const settling=isSettling();
+    if(settling){if(!wavefieldReference)wavefieldReference=wavefieldAmp;}
+    else wavefieldReference=0;
+    const scale = 1/(settling?wavefieldReference:wavefieldAmp);
+    /* The sponge does the real work, but 0.45 s is not long enough to clear
+       every corner, so a display ramp over the final stretch takes it to
+       exactly zero rather than stopping on a faint residue. */
+    const settleFade=settling?Math.max(0,Math.min(1,(1-settleProgress())/.4)):1;
     // Gamma 0.45 maps a peak of 1 back to 1 while lifting 0.01 to 0.12, so weak
     // reflected and transmitted energy becomes visible without the strong
     // direct wave clipping to a flat blob. The alpha ramp is eased to match.
@@ -1094,7 +1140,7 @@ function drawModel(){
       for(let i=0;i<MX;i++){
         // Gamma compression (the "boost" toggle) lifts weak reflected and
         // scattered energy into view beside the saturating direct wave.
-        const u=wfFrame[drow+i]*scale;
+        const u=wfFrame[drow+i]*scale*settleFade;
         const v=Math.max(-1,Math.min(1,boost?Math.sign(u)*Math.pow(Math.abs(u),.45):u*2));
         const a=Math.min(255, Math.abs(v)*alphaScale);
         const o=(drow+i)*4;
@@ -1163,7 +1209,7 @@ function drawGather(){
   const dxTr=pw/n;
   const displayAmax=robustTraceArrayAmplitude(traces.slice(0,n));
   const amp=dxTr*1.6/Math.max(displayAmax,1e-9);
-  const shown = running? it : nt;
+  const shown = running? Math.min(it,nt) : nt;
 
   // time axis
   gc.strokeStyle='#232a33'; gc.fillStyle='#8a949f';
@@ -1219,7 +1265,7 @@ function drawGray(){
   if(!traces||!n||pw<1||ph<1) return;
   if(!grImg||grImg.width!==pw||grImg.height!==ph) grImg=grc.createImageData(pw,ph);
   const d=grImg.data;
-  const shown = running? it : nt;
+  const shown = running? Math.min(it,nt) : nt;
   const scale = 1/Math.max(robustTraceArrayAmplitude(traces.slice(0,n)),1e-9);
   for(let y=0;y<ph;y++){
     // map pixel row -> sample index
@@ -1633,6 +1679,112 @@ function refreshReceiverControls(){
   selectedReceiverId=catalog.some(entry=>entry.id===old)?old:(catalog[0]?.id??null);if(selectedReceiverId!==null)select.value=selectedReceiverId;
 }
 
+/* ---------------- live survey schematic ---------------- */
+/* The wavefield panel shows the physics but not the survey: which shot is
+   firing, where it sits on the line, and which receivers it is recording into.
+   In streamer mode the spread moves with every shot, so without this the fold
+   pattern that appears later has no visible cause. Drawn from the same geometry
+   the solver uses, so it cannot disagree with what is being recorded. */
+function schematicFocusShot(){
+  if((running||paused)&&activeShotId!==null){
+    const active=shotPositions.find(shot=>shot.id===activeShotId);
+    if(active)return active;
+  }
+  return shotPositions.find(shot=>shot.id===selectedShotId)||shotPositions[0]||null;
+}
+
+function drawAcquisitionSchematic(){
+  const cv=document.getElementById('acqSchematic');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('acqSchematicInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='11px ui-sans-serif,system-ui,sans-serif';
+  const plotL=104,plotR=W-16,pw=plotR-plotL,modelWidth=MX*DX;
+  const xMap=metres=>plotL+Math.max(0,Math.min(1,metres/modelWidth))*pw;
+  const sourceY=52,receiverY=104,axisY=132;
+
+  if(!shotPositions.length){
+    ctx.fillStyle='#8a949f';ctx.fillText('No shots placed — use the source presets, or the Add Shot tool.',plotL,sourceY);
+    info.textContent='Add shots and receivers, then run acquisition.';
+    return;
+  }
+  const focus=schematicFocusShot(),layout=focus?receiverLayoutForShot(focus):[];
+
+  // water column, so the marine case reads as marine at a glance
+  if(isOffshore()){
+    ctx.fillStyle='rgba(23,71,94,.55)';ctx.beginPath();ctx.moveTo(plotL,18);ctx.lineTo(plotR,18);
+    for(let k=40;k>=0;k--){
+      const x=k/40,depth=seabedFractionAt(x)*MZ*DX;
+      ctx.lineTo(plotL+x*pw,18+Math.min(58,depth/400*58));
+    }
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle='rgba(140,215,255,.7)';ctx.lineWidth=1.2;ctx.beginPath();
+    for(let k=0;k<=40;k++){
+      const x=k/40,depth=seabedFractionAt(x)*MZ*DX,y=18+Math.min(58,depth/400*58);
+      k?ctx.lineTo(plotL+x*pw,y):ctx.moveTo(plotL+x*pw,y);
+    }
+    ctx.stroke();
+    ctx.fillStyle='rgba(150,205,235,.85)';ctx.fillText('sea',plotL+4,30);
+  }
+
+  // the offset fan: which receivers this shot is recording into
+  if(focus&&layout.length){
+    const stride=Math.max(1,Math.round(layout.length/14));
+    ctx.strokeStyle='rgba(255,200,87,.30)';ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let k=0;k<layout.length;k+=stride){
+      ctx.moveTo(xMap(focus.i*DX),sourceY+7);ctx.lineTo(xMap(layout[k].i*DX),receiverY-7);
+    }
+    ctx.stroke();
+  }
+
+  // lines
+  ctx.strokeStyle='#2a333c';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(plotL,sourceY);ctx.lineTo(plotR,sourceY);
+  ctx.moveTo(plotL,receiverY);ctx.lineTo(plotR,receiverY);ctx.stroke();
+
+  // sources: acquired, pending, and the one firing now
+  shotPositions.forEach(shot=>{
+    const x=xMap(shot.i*DX),done=shotRecords.some(record=>record.id===shot.id);
+    const active=(running||paused)&&shot.id===activeShotId;
+    ctx.fillStyle=active?'#ffc857':done?'#ff6b6b':'rgba(255,107,107,.32)';
+    ctx.beginPath();
+    for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?2.6:6;k?ctx.lineTo(x+Math.cos(a)*rr,sourceY+Math.sin(a)*rr):ctx.moveTo(x+Math.cos(a)*rr,sourceY+Math.sin(a)*rr);}
+    ctx.closePath();ctx.fill();
+    if(active){ctx.strokeStyle='#ffe4a2';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,sourceY,11,0,Math.PI*2);ctx.stroke();}
+  });
+
+  // the spread this shot records into
+  layout.forEach(receiver=>{
+    const x=xMap(receiver.i*DX);
+    ctx.fillStyle='#7fd3ff';
+    ctx.beginPath();ctx.moveTo(x,receiverY+5);ctx.lineTo(x-4,receiverY-3);ctx.lineTo(x+4,receiverY-3);ctx.closePath();ctx.fill();
+  });
+
+  // distance axis
+  ctx.strokeStyle='#3a444f';ctx.beginPath();ctx.moveTo(plotL,axisY);ctx.lineTo(plotR,axisY);ctx.stroke();
+  ctx.fillStyle='#65717e';ctx.textAlign='center';
+  for(let metres=0;metres<=modelWidth;metres+=200){
+    const x=xMap(metres);
+    ctx.beginPath();ctx.moveTo(x,axisY-4);ctx.lineTo(x,axisY+4);ctx.stroke();
+    ctx.fillText(String(metres),x,axisY+16);
+  }
+  ctx.textAlign='left';
+
+  ctx.fillStyle='#8a949f';ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  ctx.fillText('SHOT LINE',8,sourceY+3);
+  ctx.fillText(acquisitionMode()==='streamer'?'STREAMER':isOffshore()?'SEABED NODES':'PLANTED SPREAD',8,receiverY+3);
+  ctx.fillText('surface x (m)',8,axisY+16);
+
+  const acquired=shotRecords.length,total=shotPositions.length;
+  if(!focus||!layout.length){info.textContent=`${acquired} of ${total} shots acquired · no receivers for this shot.`;return;}
+  const offsets=layout.map(receiver=>(receiver.i-focus.i)*DX);
+  const near=Math.min(...offsets.map(Math.abs)),far=Math.max(...offsets.map(Math.abs));
+  const position=(running||paused)?`Firing shot ${queueIndex+1} of ${acquisitionQueue.length}`:`Shot S${focus.id} selected`;
+  info.textContent=`${position} · source at ${(focus.i*DX).toFixed(0)} m · ${layout.length} live channels · offsets ${near.toFixed(0)}–${far.toFixed(0)} m · `+
+    `${acquired}/${total} shots acquired${isSettling()?' · wavefield draining':''}`;
+}
+
 function drawAcquisitionViews(){
   const shotRecordsView=acquisitionTraces.filter(t=>t.shotId===selectedShotId);
   drawTraceGather(document.getElementById('acqGather'),shotRecordsView,{axis:document.getElementById('shotAxis').value,empty:'Select a completed shot'});
@@ -1644,7 +1796,7 @@ function drawAcquisitionViews(){
   if(spectrumViewVisible())drawSpectrum();
 }
 
-function renderModelFrame(){mc.clearRect(0,0,CW,CH);drawModel();}
+function renderModelFrame(){mc.clearRect(0,0,CW,CH);drawModel();drawAcquisitionSchematic();}
 function render(){renderModelFrame();drawGather();drawGray();if(currentStage==='nmo')drawNmo();}
 
 /* Canvas drawing was formerly performed after every solver batch. At 4x and
@@ -2458,10 +2610,10 @@ onmessage=function(e){
     job=m;paused=false;cancelled=false;credit=0;clock=performance.now();lastField=0;lastTraces=0;
     const n=g.NX*g.NZ;
     const p0=new Float32Array(n),p1=new Float32Array(n),p2=new Float32Array(n);
-    traces=[];for(let k=0;k<m.recIdx.length;k++)traces.push(new Float32Array(m.nt));
+    traces=[];for(let k=0;k<m.recIdx.length;k++)traces.push(new Float32Array(m.recordUntil));
     state={c:g.c,q:g.q,xp:g.xp,xm:g.xm,zp:g.zp,zm:g.zm,
       NX:g.NX,NZ:g.NZ,OX:g.OX,MX:g.MX,DX:g.DX,dt:m.dt,f0:m.f0,topVp:g.topVp,
-      freeSurface:m.freeSurface,srcIdx:m.srcIdx,recIdx:m.recIdx,traces,
+      freeSurface:m.freeSurface,srcIdx:m.srcIdx,recIdx:m.recIdx,traces,recordUntil:m.recordUntil,
       p0,p1,p2,it:0,maxAmp:1e-9};
     schedule(0);return;
   }
@@ -2520,7 +2672,8 @@ function postSolverShot(){
   const recIdx=new Int32Array(activeReceivers.length);
   activeReceivers.forEach((r,n)=>{recIdx[n]=simIdx(r.i,r.j);});
   workerLastIt=0;
-  solverWorker.postMessage({type:'shot',srcIdx:simIdx(src.i,src.j),recIdx,nt,dt,f0,
+  solverWorker.postMessage({type:'shot',srcIdx:simIdx(src.i,src.j),recIdx,
+    nt:stepsThisShot,recordUntil:nt,dt,f0,
     freeSurface:topBoundary==='free',speed:simulationSpeed},[recIdx.buffer]);
   return true;
 }
@@ -2539,7 +2692,7 @@ function onSolverWorkerMessage(e){
   if(m.type==='done'){
     // finalizeShot takes ownership of these arrays; the next shot allocates
     // fresh ones, so no second copy of the samples is ever made.
-    traces=m.traces;maxAmp=m.maxAmp;it=nt;
+    traces=m.traces;maxAmp=m.maxAmp;it=stepsThisShot;
     if(finishCurrentShot(performance.now()))postSolverShot();
     else workerActive=false;
   }
@@ -2572,6 +2725,7 @@ solverChannel.port1.onmessage=()=>{solverTimer=null;solverPump();};
 
 function cancelAcquisitionNow(){
   running=false;paused=false;cancelRequested=false;acquisitionQueue=[];activeShotId=null;solverCredit=0;workerActive=false;
+  clearWavefieldDisplay();
   document.getElementById('pauseAcq').textContent='Pause';
   document.getElementById('stat').textContent='acquisition cancelled';
   buildCmpBins(false);refreshShotGallery();refreshReceiverControls();updateFlow();render();
@@ -2582,6 +2736,7 @@ function finishCurrentShot(now){
   if(queueIndex<acquisitionQueue.length){initializeShotSimulation(acquisitionQueue[queueIndex]);return true;}
   const averageSpeed=measuredPropagationSpeed(now);
   running=false;activeShotId=null;solverCredit=0;document.getElementById('acqProgress').style.width='100%';
+  clearWavefieldDisplay();
   document.getElementById('pauseAcq').textContent='Pause';
   document.getElementById('stat').textContent=`Acquisition complete · ${shotRecords.length} shot gather${shotRecords.length===1?'':'s'} stored · measured ${averageSpeed.toFixed(1)}×`;
   document.getElementById('activeShotInfo').textContent='All queued shots complete. Select a card, receiver, or build CMP gathers.';
@@ -2605,7 +2760,7 @@ function solverPump(){
   const budgetMs=simulationSpeed<=1?5:simulationSpeed<=2?8:simulationSpeed<=4?24:simulationSpeed<=8?48:80;
   while(running&&!paused&&!cancelRequested&&solverCredit>=1&&performance.now()-start<budgetMs){
     step();perfSteps++;solverCredit--;
-    if(it>=nt&&!finishCurrentShot(performance.now()))break;
+    if(it>=stepsThisShot&&!finishCurrentShot(performance.now()))break;
   }
   if(!running)return;
   if(cancelRequested){cancelAcquisitionNow();return;}
@@ -2617,8 +2772,10 @@ function frame(now=performance.now()){
   if(running){
     if(!paused){
       const updateStatus=updatePropagationReadout(now),shot=acquisitionQueue[queueIndex];
-      if(shot&&updateStatus){
-        const pct=100*(queueIndex+it/Math.max(1,nt))/Math.max(1,acquisitionQueue.length);
+      if(shot&&updateStatus&&isSettling()){
+        document.getElementById('stat').textContent=`Last shot recorded · letting the wavefield drain into the absorbing boundary · ${(settleProgress()*100).toFixed(0)}%`;
+      }else if(shot&&updateStatus){
+        const pct=100*(queueIndex+Math.min(1,it/Math.max(1,stepsThisShot)))/Math.max(1,acquisitionQueue.length);
         document.getElementById('stat').textContent=`Shot ${queueIndex+1} / ${acquisitionQueue.length} · x = ${(shot.i*DX).toFixed(0)} m · t = ${(it*dt).toFixed(3)} s · ${pct.toFixed(0)}% · target ${simulationSpeed}× · measured ${measuredPropagationSpeed(now).toFixed(1)}×`;
         document.getElementById('acqProgress').style.width=`${pct}%`;document.querySelector('.progress').setAttribute('aria-valuenow',Math.round(pct));
       }

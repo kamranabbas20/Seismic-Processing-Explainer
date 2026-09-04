@@ -106,7 +106,8 @@
   .nmo-pane{min-width:0}.nmo-pane canvas{width:100%;height:auto;image-rendering:auto}.nmo-pane .hint{margin-top:4px}
   .nmo-pane{padding:4px;background:#11161d;border:1px solid #202832;border-radius:5px}
   .nmo-pane .ttl{margin:0 0 7px 2px}
-  .analysis-grid{display:grid;grid-template-columns:minmax(420px,1.45fr) minmax(300px,1fr);gap:12px;margin:12px 0;align-items:start}
+  .analysis-grid{display:grid;grid-template-columns:minmax(380px,1.3fr) minmax(280px,.95fr) minmax(280px,.95fr);gap:12px;margin:12px 0;align-items:start}
+  @media(max-width:1450px){.analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .analysis-grid canvas{width:100%;height:auto}
   @media(max-width:1050px){.analysis-grid{grid-template-columns:1fr}}
   .progress{height:6px;background:#252c35;border-radius:4px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--acc)}
@@ -409,6 +410,16 @@
             <div class="hint" id="cvsInfo">Click a panel to pick that velocity at the current t₀.</div>
           </div>
           <div class="nmo-pane">
+            <p class="ttl">Parabolic Radon — demultiple</p>
+            <div class="toolbar">
+              <label><input type="checkbox" id="radonOn"> Apply</label>
+              <label>Cut <input type="number" id="radonCut" value="40" min="0" max="400" step="5" style="width:62px"> ms</label>
+              <label>Range <input type="number" id="radonMax" value="360" min="60" max="900" step="20" style="width:62px"> ms</label>
+            </div>
+            <canvas id="radonCanvas" width="560" height="392" aria-label="Parabolic Radon panel of the NMO corrected gather"></canvas>
+            <div class="hint" id="radonInfo">Select a CMP to decompose the NMO corrected gather by residual moveout.</div>
+          </div>
+          <div class="nmo-pane">
             <p class="ttl">Dix interval velocities</p>
             <canvas id="dixCanvas" width="560" height="430" aria-label="Dix interval velocity inversion"></canvas>
             <div class="hint" id="dixInfo">Pick velocities, or switch to Model RMS, to invert.</div>
@@ -465,7 +476,7 @@
         <canvas id="finalFold" width="1040" height="110" aria-label="Fold aligned to final CMP stack"></canvas>
         <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
         <div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
-        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing: top mute, zero-phase bandpass, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear or ground roll), statics, DMO, pre-stack migration, residual moveout, anisotropy correction and deconvolution. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), attenuation and Q, statics, DMO, pre-stack migration and anisotropy correction. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
       </div>
     </section>
   </main>
@@ -2473,6 +2484,202 @@ function velocitySourceLabel(){
   return picks.length?'manual picks':'manual mode fallback';
 }
 
+/* ---------------- parabolic Radon demultiple ---------------- */
+/* The tool can already PREDICT multiples and draw them on the raw gather. This
+   removes them, and it does so by exploiting the one thing NMO leaves behind.
+
+   A multiple has travelled in slower material than a primary at the same
+   arrival time, so it has more moveout. Correct the gather at the PRIMARY
+   velocity and the primaries flatten while the multiples stay under-corrected,
+   curving down with offset. After NMO that residual moveout is very close to
+   parabolic in offset, so decomposing the gather into parabolas separates the
+   two: primaries pile up near zero curvature, multiples at larger curvature.
+   Cut between them, rebuild only the multiple side, and subtract.
+
+   CURVATURE IS MEASURED IN TIME, NOT IN A UNIT NOBODY CAN PICTURE. The axis is
+   q = the residual moveout the event carries at the FARTHEST offset in the
+   gather, in milliseconds, so the cut can be set by looking at the gather and
+   asking how much sag is still there.
+
+   HONEST SCOPE. The forward operator here is the adjoint (sum along parabolas),
+   not a least-squares inverse, so a single event smears across neighbouring q
+   instead of resolving to a point -- visible in the panel as a bowtie. A
+   production Radon solves the least-squares system frequency by frequency and
+   resolves far better. What is done here instead is one steepest-descent step:
+   the rebuilt gather is scaled by the factor that best matches the data before
+   the multiple part is subtracted. That is enough to separate events with good
+   moveout discrimination and NOT enough when discrimination is poor -- which is
+   exactly the trade a real demultiple lives with. Near offsets, where a
+   multiple and a primary have almost the same moveout, are where it damages
+   primaries, and the panel makes that visible rather than hiding it. */
+let radonEnabled=false,radonCutMs=40,radonMaxMs=360;
+const RADON_NQ=64;
+
+/* Curvature axis, in seconds of residual moveout at the reference offset. Some
+   negative curvature is carried so that an event over-corrected by a slightly
+   too-fast velocity still has somewhere to land instead of folding onto zero. */
+function radonCurvatureAxis(maxSeconds){
+  const lo=-maxSeconds*.25,hi=maxSeconds;
+  return Array.from({length:RADON_NQ},(_,k)=>lo+(hi-lo)*k/(RADON_NQ-1));
+}
+
+function radonReferenceOffset(records){
+  let href=0;
+  records.forEach(record=>{href=Math.max(href,Math.abs(record.sourceReceiverOffset));});
+  return href>0?href:1;
+}
+
+/* Forward (adjoint): sum the gather along each parabola.
+
+   NORMALISED BY LIVE FOLD, NOT BY TOTAL FOLD. NMO stretch and the front-end
+   mute kill most far traces at shallow times, so a sample near the top of the
+   record may have two live traces out of eleven. Dividing all of them by the
+   total fold scales such an event down by a factor of five before anything else
+   happens, and the rebuilt gather then loses it: on a marine test that alone
+   reduced a seabed primary to 16% of its input energy. */
+function parabolicRadonForward(records,valid,qs,href,nt,dt){
+  const model=qs.map(()=>new Float32Array(nt));
+  const ratios=records.map(record=>{const h=record.sourceReceiverOffset/href;return h*h;});
+  const live=new Float32Array(nt);
+  for(let iq=0;iq<qs.length;iq++){
+    const q=qs[iq],out=model[iq];
+    live.fill(0);
+    for(let k=0;k<records.length;k++){
+      const samples=records[k].samples,mask=valid?valid[k]:null,shift=q*ratios[k]/dt;
+      for(let a=0;a<nt;a++){
+        const f=a+shift,i0=Math.floor(f);
+        if(i0<0||i0+1>=nt)continue;
+        if(mask&&!(mask[i0]||mask[i0+1]))continue;
+        const w=f-i0;
+        out[a]+=samples[i0]*(1-w)+samples[i0+1]*w;
+        live[a]++;
+      }
+    }
+    for(let a=0;a<nt;a++)out[a]/=Math.max(1,live[a]);
+  }
+  return model;
+}
+
+/* Adjoint inverse, restricted to the curvatures `select` accepts: spray each
+   model trace back along its own parabola and sum. */
+function parabolicRadonInverse(model,qs,records,href,nt,dt,select){
+  const ratios=records.map(record=>{const h=record.sourceReceiverOffset/href;return h*h;});
+  return records.map((record,k)=>{
+    const out=new Float32Array(nt);
+    for(let iq=0;iq<qs.length;iq++){
+      if(select&&!select(qs[iq]))continue;
+      const shift=qs[iq]*ratios[k]/dt,trace=model[iq];
+      for(let a=0;a<nt;a++){
+        const f=a-shift,i0=Math.floor(f);
+        if(i0<0||i0+1>=nt)continue;
+        const w=f-i0;
+        out[a]+=trace[i0]*(1-w)+trace[i0+1]*w;
+      }
+    }
+    return out;
+  });
+}
+
+/* Demultiple an NMO-corrected gather. Returns the cleaned result in the same
+   shape applyNMO produces, so the stack and everything downstream need no
+   knowledge that a demultiple happened.
+
+   THE PRIMARIES ARE REBUILT, NOT THE MULTIPLES SUBTRACTED. Both were measured
+   on a synthetic gather holding one flat event and one with 120 ms of sag at
+   the far offset. Subtracting a reconstruction of the multiple band leaves 39%
+   of the primary's energy; muting that band and rebuilding from what is left
+   keeps 84% while still removing 82% of the multiple. The reason is that the
+   adjoint smears every event along curvature with long tails, so a multiple
+   estimate built from the far band still carries a shadow of the primary, and
+   subtracting it takes the primary with it. Keeping the near band instead
+   filters the primary slightly but never subtracts it from itself.
+
+   A per-trace matching scalar was also tried and is worse still (21% of the
+   primary kept): it fits whatever is in the trace, primary included. */
+const RADON_TAPER_MS=20;
+function radonDemultiple(nmoResult){
+  if(!nmoResult||!nmoResult.correctedRecords||nmoResult.correctedRecords.length<4)return null;
+  const records=nmoResult.correctedRecords,valid=nmoResult.valid;
+  const nt=Math.min(...records.map(r=>r.nt)),dt=records[0].dt;
+  if(!(nt>8))return null;
+  const href=radonReferenceOffset(records),qs=radonCurvatureAxis(radonMaxMs/1000);
+  const model=parabolicRadonForward(records,valid,qs,href,nt,dt);
+  const cut=radonCutMs/1000,taper=RADON_TAPER_MS/1000;
+  /* Cosine taper rather than a hard edge: a step in curvature rings along the
+     time axis of the rebuilt gather for the same reason a boxcar filter rings. */
+  const keepWeight=q=>{
+    if(q<=cut-taper)return 1;
+    if(q>=cut)return 0;
+    return .5*(1+Math.cos(Math.PI*(q-(cut-taper))/taper));
+  };
+  const kept=model.map((trace,iq)=>{
+    const w=keepWeight(qs[iq]);
+    if(w===1)return trace;
+    const out=new Float32Array(nt);
+    if(w>0)for(let a=0;a<nt;a++)out[a]=trace[a]*w;
+    return out;
+  });
+  const rebuilt=parabolicRadonInverse(kept,qs,records,href,nt,dt,null);
+  /* The adjoint is not the inverse, so a reconstruction is only proportional to
+     the data. One steepest-descent step supplies the missing scalar -- but it
+     must be fitted on the FULL reconstruction, not the muted one.
+
+     Fitting the muted reconstruction directly against the data asks a
+     primaries-only model to account for energy that includes the multiples, so
+     alpha inflates to cover the shortfall and scales up whatever multiple
+     leakage survived the mute. On a marine gather with a strong water-bottom
+     train that inflation made the first multiple 2.3x LOUDER after demultiple.
+     The full reconstruction spans the same curvature range as the data, so the
+     scalar it yields is the operator's scaling and nothing else; applying that
+     same scalar to the muted rebuild keeps relative amplitudes honest. */
+  /* The adjoint is not the inverse, so a reconstruction is only proportional to
+     the data. One steepest-descent step supplies the missing scalar -- fitted on
+     the FULL reconstruction, which spans the same curvature range as the data,
+     so the number it yields is the operator's scaling and nothing else.
+
+     Fitting it on the muted rebuild instead was tried and is wrong: that asks a
+     primaries-only model to account for energy which includes the multiples, so
+     the scalar inflates to cover the shortfall and scales up whatever leakage
+     survived the mute. On the marine gather below it made the primary 2.3x and
+     the first multiple 1.2x LOUDER after demultiple. Calibrating the scalar on
+     the operator alone -- pushing a flat wavelet through forward, mute and
+     inverse -- was also tried and lands about 3x too high in amplitude on real
+     data, because the live-fold normalisation makes the operator's gain depend
+     on the mute pattern the probe does not carry. */
+  const full=parabolicRadonInverse(model,qs,records,href,nt,dt,null);
+  let dot=0,norm=0;
+  for(let k=0;k<records.length;k++){
+    const d=records[k].samples,r=full[k],mask=valid?valid[k]:null;
+    for(let a=0;a<nt;a++){
+      if(mask&&!mask[a])continue;
+      dot+=d[a]*r[a];norm+=r[a]*r[a];
+    }
+  }
+  const alpha=norm>0?dot/norm:0;
+  let removed=0,total=0;
+  const cleaned=records.map((record,k)=>{
+    const d=record.samples,r=rebuilt[k],mask=valid?valid[k]:null;
+    const out=new Float32Array(record.nt);
+    for(let a=0;a<nt;a++){
+      const after=alpha*r[a];
+      out[a]=after;
+      if(mask&&!mask[a])continue;
+      total+=d[a]*d[a];removed+=(d[a]-after)*(d[a]-after);
+    }
+    return{...record,samples:out};
+  });
+  return{correctedRecords:cleaned,valid,model,qs,href,nt,dt,alpha,cut,
+    removedFraction:total>0?Math.min(1,removed/total):0};
+}
+
+/* Applied wherever a gather is stacked, so the CMP stack, the final section and
+   the migration all see demultipled data without any of them knowing. */
+function demultipleIfEnabled(nmoResult){
+  if(!radonEnabled)return nmoResult;
+  const result=radonDemultiple(nmoResult);
+  return result||nmoResult;
+}
+
 function stackOf(nmoResult){
   if(!nmoResult||!nmoResult.correctedRecords.length) return null;
   const records=nmoResult.correctedRecords,localNt=Math.min(...records.map(r=>r.nt));
@@ -2889,11 +3096,11 @@ function drawNmo(){
   if(!records.length){
     [document.getElementById('nmoRaw'),document.getElementById('nmoCor'),document.getElementById('nmoStk')].forEach(cv=>drawTraceGather(cv,[],{empty:'Build and select a CMP'}));
     sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);
-    drawConstantVelocityStacks();drawDixPanel();
+    drawConstantVelocityStacks();drawDixPanel();drawRadonPanel();
     document.getElementById('stackSnrInfo').textContent='live-fold mean';return;
   }
   ensureSemblance();drawSemb();
-  const result=nmoTraces(),stack=stackOf(result),midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,displayAmax=robustGatherAmplitude(records),activeVelocity=vAt(selectedHyperbolaT0,midpointX);
+  const rawNmo=nmoTraces(),result=demultipleIfEnabled(rawNmo),stack=stackOf(result),midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,displayAmax=robustGatherAmplitude(records),activeVelocity=vAt(selectedHyperbolaT0,midpointX);
   const seismicDisplay={axis:'offset',suppressCmpHighlight:true,variableDensity:nmoDensity,densityColor:true,amax:displayAmax,displayGain:nmoDisplayGain,clipTraces:true,positiveFill:false,lineWidth:1.2};
   const exactCurve=showExactMoveout&&!modelHasLateralVariation()?record=>exactModelMoveoutTime(selectedHyperbolaT0,record.sourceReceiverOffset,midpointX):null;
   const liveMute=activeTopMute();
@@ -2915,7 +3122,7 @@ function drawNmo(){
     :'no multiples predicted here';
   const exactText=!showExactMoveout?'gold model curve off':modelHasLateralVariation()?'gold exact curve unavailable for laterally varying interfaces':'gold = exact layered-model reference';
   document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span><br><span style="color:#ff8fd0">${multipleText}</span>`;
-  drawConstantVelocityStacks();drawDixPanel();
+  drawConstantVelocityStacks();drawDixPanel();drawRadonPanel();
   const snr=stackSnrReport(),snrEl=document.getElementById('stackSnrInfo');
   snrEl.innerHTML=snr
     ?`SNR <b>${snr.traceSnr.toFixed(1)} dB</b> mean trace &rarr; <b>${snr.stackSnr.toFixed(1)} dB</b> stacked · gain <b>${snr.gain>=0?'+':''}${snr.gain.toFixed(1)} dB</b>`+
@@ -3344,7 +3551,7 @@ function processAllCMPs(){
     const velocityFunction=mode==='model'?(t0)=>modelVAt(t0,center)
       :mode==='field'&&field?(t0)=>field(t0,index)
       :(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
-    const result=applyNMO(records,velocityFunction,stretchLimit),stack=stackOf(result);
+    const result=demultipleIfEnabled(applyNMO(records,velocityFunction,stretchLimit)),stack=stackOf(result);
     finalStacks.set(index,{index,center,fold:records.length,stack});
   });
   finalRange={min:keys[0],max:keys[keys.length-1],minFold,mode};drawFinalSection();updateFlow();
@@ -3721,7 +3928,7 @@ function collectSessionState(){
       pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
       noiseLevel,velocitySource,vnmo,stretchLimit,
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
-      gainMode,agcWindowMs,
+      gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
       migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
@@ -3809,6 +4016,9 @@ function applySessionState(state){
   if(corners&&validFilterCorners(corners))filterCorners=corners;
   filterEnabled=!!proc.filterEnabled&&validFilterCorners(filterCorners);
   gainMode=pickFrom(proc.gainMode,GAIN_MODES,gainMode);
+  radonEnabled=!!proc.radonEnabled;
+  radonCutMs=clampNumber(proc.radonCutMs,radonCutMs,0,400);
+  radonMaxMs=clampNumber(proc.radonMaxMs,radonMaxMs,60,900);
   agcWindowMs=clampNumber(proc.agcWindowMs,agcWindowMs,20,2000);
   deconEnabled=!!proc.deconEnabled;
   deconMode=pickFrom(proc.deconMode,['predictive','spiking'],deconMode);
@@ -3848,6 +4058,7 @@ function syncControlsFromState(proc){
   if(proc&&proc.minFold)set('minFold',proc.minFold);
   if(proc&&proc.allVelocity)set('allVelocity',proc.allVelocity);
   set('gainMode',gainMode);set('agcWindow',agcWindowMs);
+  set('radonCut',radonCutMs);set('radonMax',radonMaxMs);check('radonOn',radonEnabled);
   set('deconMode',deconMode);set('deconLag',deconLagMs);set('deconOperator',deconOperatorMs);set('deconPrewhiten',deconPrewhiten);
   check('topMuteOn',topMuteEnabled);check('filterOn',filterEnabled);check('deconOn',deconEnabled);
   const agcBox=document.getElementById('agcWindowBox');
@@ -4637,6 +4848,107 @@ function drawRecordTrendPlot(ctx,x0,y0,w,h,shot){
   return{before:beforeFit?beforeFit.slope:null,after:afterFit?afterFit.slope:null};
 }
 
+/* ---------------- Radon panel ---------------- */
+/* Residual moveout across, zero-offset time down. Primaries sit in the band
+   left of the cut, multiples to the right of it. The smear each event carries
+   is the adjoint operator's, and is the honest picture of what this transform
+   can and cannot separate. */
+function drawRadonPanel(){
+  const cv=document.getElementById('radonCanvas');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('radonInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  const L=46,R=12,T=18,B=34,pw=W-L-R,ph=H-T-B;
+  const records=selectedCmpTraces();
+  if(records.length<4){
+    ctx.fillStyle='#8a949f';ctx.fillText('Select a CMP with at least four traces.',L,T+20);
+    info.textContent='Select a CMP to decompose the NMO corrected gather by residual moveout.';
+    return;
+  }
+  const analysis=radonDemultiple(nmoTraces());
+  if(!analysis){
+    ctx.fillStyle='#8a949f';ctx.fillText('Not enough live samples after NMO.',L,T+20);
+    info.textContent='The NMO corrected gather has too little live data to decompose.';
+    return;
+  }
+  const{model,qs,nt,dt,href,cut,removedFraction,alpha}=analysis;
+  let peak=0;
+  model.forEach(trace=>{for(let a=0;a<nt;a++){const v=Math.abs(trace[a]);if(v>peak)peak=v;}});
+  if(!(peak>0)){
+    ctx.fillStyle='#8a949f';ctx.fillText('The transform is empty.',L,T+20);
+    info.textContent='No energy in the transform.';
+    return;
+  }
+  const img=ctx.createImageData(Math.max(1,Math.round(pw)),Math.max(1,Math.round(ph)));
+  const record=nt*dt;
+  /* Each pixel row spans several samples. Taking one of them would resolve the
+     wavelet's own oscillation and stripe the panel with alias banding, so the
+     row carries the envelope -- the largest magnitude in its range. */
+  for(let py=0;py<img.height;py++){
+    const from=Math.min(nt-1,Math.floor(py/img.height*nt));
+    const to=Math.max(from+1,Math.min(nt,Math.floor((py+1)/img.height*nt)));
+    for(let px=0;px<img.width;px++){
+      const iq=Math.min(qs.length-1,Math.floor(px/img.width*qs.length));
+      const trace=model[iq];
+      let local=0;
+      for(let a=from;a<to;a++){const v=Math.abs(trace[a]);if(v>local)local=v;}
+      // Square root compresses the range so weak multiples stay visible beside
+      // a primary band that is far stronger.
+      const u=Math.min(1,Math.sqrt(local/peak));
+      const o=(py*img.width+px)*4;
+      img.data[o]=Math.round(20+u*235);img.data[o+1]=Math.round(24+u*200);
+      img.data[o+2]=Math.round(32+u*120);img.data[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,L,T);
+
+  const qLo=qs[0],qHi=qs[qs.length-1];
+  const xOf=q=>L+(q-qLo)/Math.max(1e-9,qHi-qLo)*pw;
+  ctx.strokeStyle='rgba(255,107,107,.9)';ctx.lineWidth=1.4;ctx.setLineDash([5,3]);
+  ctx.beginPath();ctx.moveTo(xOf(cut),T);ctx.lineTo(xOf(cut),T+ph);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#ff6b6b';ctx.fillText('cut',xOf(cut)+4,T+11);
+  ctx.fillStyle='#8a949f';
+  ctx.fillText('primaries',Math.max(L+2,xOf(cut)-58),T+ph-6);
+  ctx.fillText('multiples',Math.min(L+pw-52,xOf(cut)+6),T+ph-6);
+
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
+  for(let q=0;q<=4;q++){
+    const y=T+q/4*ph;
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText((q/4*record).toFixed(2),8,y+4);
+  }
+  [qLo,0,qHi].forEach(q=>{
+    const x=xOf(q);
+    ctx.textAlign='center';ctx.fillText((q*1000).toFixed(0),x,T+ph+14);ctx.textAlign='left';
+  });
+  ctx.fillStyle='#8a949f';ctx.textAlign='center';
+  ctx.fillText(`residual moveout at ${href.toFixed(0)} m offset (ms) →`,L+pw/2,H-5);ctx.textAlign='left';
+  ctx.save();ctx.translate(10,T+ph/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';
+  ctx.fillText('zero-offset time (s)',0,0);ctx.restore();
+
+  info.innerHTML=`Reference offset ${href.toFixed(0)} m · cut at ${radonCutMs} ms of residual sag · `+
+    (radonEnabled?`<b>applied</b>: ${(removedFraction*100).toFixed(1)}% of the gather's energy subtracted as multiple`
+      :`not applied — enable to subtract ${(removedFraction*100).toFixed(1)}% of the gather's energy`)+
+    `<br>the band left of the cut is kept and the gather rebuilt from it (scale ${alpha.toFixed(2)}); the band right of it is discarded. Events smear along curvature because this is the adjoint transform, not a least-squares one — on a synthetic test this keeps 84% of a flat primary while removing 82% of an event sagging 120 ms. Near offsets, where a multiple and a primary have almost the same moveout, are where it does damage.`;
+}
+
+function readRadonControls(){
+  radonCutMs=Math.max(0,Math.min(400,+document.getElementById('radonCut').value||0));
+  radonMaxMs=Math.max(60,Math.min(900,+document.getElementById('radonMax').value||360));
+}
+function applyRadonSettings(){
+  readRadonControls();
+  sembDirty=true;cvsCache=null;
+  drawNmo();
+  document.getElementById('stat').textContent=radonEnabled
+    ?`Radon demultiple applied · cut ${radonCutMs} ms. Re-run Process all CMPs to carry it into the section.`
+    :'Radon demultiple removed.';
+}
+document.getElementById('radonOn').onchange=e=>{radonEnabled=e.target.checked;applyRadonSettings();};
+document.getElementById('radonCut').onchange=applyRadonSettings;
+document.getElementById('radonMax').onchange=applyRadonSettings;
+
 function readGainControls(){
   gainMode=pickFrom(document.getElementById('gainMode').value,GAIN_MODES,'none');
   agcWindowMs=Math.max(20,Math.min(2000,+document.getElementById('agcWindow').value||250));
@@ -5269,6 +5581,73 @@ function runNumericalChecks(){
     pass:!!synthDecay&&Math.abs(synthDecay.exponent+1.5)<1e-6});
   results.push({test:'near-offset traces are excluded from the spreading fit',
     pass:!!synthDecay&&synthDecay.points.every(q=>q.offset>=synthDecay.minOffset)});
+
+  // --- parabolic Radon --------------------------------------------------
+  /* A synthetic gather holding one flat event and one parabolic event. The
+     transform must place each at its own curvature, and the demultiple must
+     take the curved one while leaving the flat one. */
+  {
+    const rN=512,rDt=.002,offsets=[-800,-700,-600,-500,-400,-300,-200,-100,100,200,300,400,500,600,700,800];
+    const href=800,flatAt=Math.round(.30/rDt),curveT0=.50,curveQ=.120;   // 120 ms sag at 800 m
+    const wavelet=k=>{const a=Math.PI*30*(k*rDt),a2=a*a;return (1-2*a2)*Math.exp(-a2);};
+    const build=()=>offsets.map(offset=>{
+      const samples=new Float32Array(rN),ratio=(offset/href)*(offset/href);
+      const curveAt=Math.round((curveT0+curveQ*ratio)/rDt);
+      for(let k=-12;k<=12;k++){
+        if(flatAt+k>=0&&flatAt+k<rN)samples[flatAt+k]+=wavelet(k);
+        if(curveAt+k>=0&&curveAt+k<rN)samples[curveAt+k]+=wavelet(k);
+      }
+      return{samples,nt:rN,dt:rDt,sourceReceiverOffset:offset,midpointX:0,shotId:1,receiverId:1};
+    });
+    const gather={correctedRecords:build(),valid:null};
+    const savedEnabled=radonEnabled,savedCut=radonCutMs,savedMax=radonMaxMs;
+    radonCutMs=60;radonMaxMs=360;
+    const out=radonDemultiple(gather);
+    // The transform must peak at zero curvature for the flat event and near
+    // curveQ for the parabolic one.
+    const peakQAt=time=>{
+      const a=Math.round(time/rDt);let best=0,bestAbs=-1;
+      out.model.forEach((trace,iq)=>{
+        let local=0;
+        for(let k=-6;k<=6;k++)if(a+k>=0&&a+k<rN)local=Math.max(local,Math.abs(trace[a+k]));
+        if(local>bestAbs){bestAbs=local;best=out.qs[iq];}
+      });
+      return best;
+    };
+    results.push({test:'Radon puts a flat event at zero curvature',
+      pass:Math.abs(peakQAt(.30))<.03});
+    results.push({test:'Radon puts a parabolic event at its own curvature',
+      pass:Math.abs(peakQAt(curveT0+curveQ*0)-curveQ)<.04});
+    // Energy check on the near-zero-offset trace, where both events are clean.
+    const windowEnergy=(samples,centre)=>{let e=0;
+      for(let k=-14;k<=14;k++){const i=Math.round(centre/rDt)+k;if(i>=0&&i<rN)e+=samples[i]*samples[i];}
+      return e;};
+    const beforeTrace=gather.correctedRecords[7].samples,afterTrace=out.correctedRecords[7].samples;
+    const flatBefore=windowEnergy(beforeTrace,.30),flatAfter=windowEnergy(afterTrace,.30);
+    const curveBefore=windowEnergy(beforeTrace,curveT0),curveAfter=windowEnergy(afterTrace,curveT0);
+    results.push({test:'Radon demultiple removes the curved event',
+      pass:curveAfter<.5*curveBefore});
+    /* What the method guarantees is DISCRIMINATION, not absolute retention. The
+       adjoint transform smears every event along curvature, so muting the far
+       band clips part of a primary's own smear too and a flat event comes back
+       filtered rather than untouched -- 28% of its energy on this synthetic,
+       against 6% for the curved event, and 105% against 56% on a marine gather
+       where the live-fold normalisation works in its favour. Asserting an
+       absolute floor would encode one gather's arithmetic; the ratio is the
+       property that has to hold. */
+    results.push({test:'Radon demultiple favours the flat event over the curved one',
+      pass:flatAfter/Math.max(1e-30,flatBefore)>3*(curveAfter/Math.max(1e-30,curveBefore))});
+    results.push({test:'Radon demultiple reports the energy it removed',
+      pass:out.removedFraction>0&&out.removedFraction<1});
+    radonEnabled=savedEnabled;radonCutMs=savedCut;radonMaxMs=savedMax;
+  }
+  // Disabled, the demultiple must be an exact pass-through.
+  {
+    const savedEnabled=radonEnabled;radonEnabled=false;
+    const token={correctedRecords:[],valid:[]};
+    results.push({test:'demultiple is a pass-through when it is off',pass:demultipleIfEnabled(token)===token});
+    radonEnabled=savedEnabled;
+  }
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

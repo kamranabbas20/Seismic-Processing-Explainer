@@ -106,7 +106,8 @@
   .nmo-pane{min-width:0}.nmo-pane canvas{width:100%;height:auto;image-rendering:auto}.nmo-pane .hint{margin-top:4px}
   .nmo-pane{padding:4px;background:#11161d;border:1px solid #202832;border-radius:5px}
   .nmo-pane .ttl{margin:0 0 7px 2px}
-  .analysis-grid{display:grid;grid-template-columns:minmax(420px,1.45fr) minmax(300px,1fr);gap:12px;margin:12px 0;align-items:start}
+  .analysis-grid{display:grid;grid-template-columns:minmax(380px,1.3fr) minmax(280px,.95fr) minmax(280px,.95fr);gap:12px;margin:12px 0;align-items:start}
+  @media(max-width:1450px){.analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .analysis-grid canvas{width:100%;height:auto}
   @media(max-width:1050px){.analysis-grid{grid-template-columns:1fr}}
   .progress{height:6px;background:#252c35;border-radius:4px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--acc)}
@@ -279,6 +280,8 @@
         <div class="subtabs">
           <button id="tabCommonShot" class="tab on">Common Shot</button>
           <button id="tabCommonReceiver" class="tab">Common Receiver</button>
+          <button id="tabOffset" class="tab">Common Offset</button>
+          <button id="tabDecon" class="tab">Deconvolution</button>
           <button id="tabSpectrum" class="tab">Spectrum &amp; Filter</button>
         </div>
         <div id="commonShotView">
@@ -291,6 +294,30 @@
           <div class="toolbar"><label>Receiver <select id="receiverSelect"></select></label><label>Axis <select id="receiverAxis"><option value="offset">Signed offset</option><option value="shot">Shot position</option></select></label></div>
           <div class="hint" id="receiverInfo">Acquire shots to build a common receiver gather.</div>
           <canvas id="receiverGather" class="selected-gather" width="1100" height="660" aria-label="Common receiver gather"></canvas>
+        </div>
+        <div id="offsetView" style="display:none">
+          <div class="toolbar">
+            <label>Offset bin <select id="offsetBin"></select></label>
+            <label>Bin width <input type="number" id="offsetBinWidth" value="40" min="5" step="5" style="width:70px"> m</label>
+            <button id="offsetRebin">Re-bin</button>
+          </div>
+          <div class="hint" id="offsetInfo">Acquire shots to build common-offset gathers.</div>
+          <canvas id="offsetGather" class="selected-gather" width="1100" height="660" aria-label="Common offset gather"></canvas>
+          <div class="note">Every trace here was recorded at nearly the same source–receiver distance, laid out by midpoint. Because the moveout is constant across the display, structure reads directly — this is the closest thing to a section available before any processing.</div>
+        </div>
+        <div id="deconView" style="display:none">
+          <div class="toolbar">
+            <label><input type="checkbox" id="deconOn"> Apply deconvolution</label>
+            <label>Type <select id="deconMode"><option value="predictive">Predictive (multiples)</option><option value="spiking">Spiking (wavelet)</option></select></label>
+            <label>Prediction lag <input type="number" id="deconLag" value="0" min="0" step="1" style="width:74px"> ms</label>
+            <button id="deconAuto">Auto from autocorrelation</button>
+            <label>Operator <input type="number" id="deconOperator" value="40" min="4" step="4" style="width:64px"> ms</label>
+            <label>Prewhiten <input type="number" id="deconPrewhiten" value="1" min="0" max="50" step="1" style="width:56px"> %</label>
+            <button id="deconApply">Apply</button>
+          </div>
+          <div class="hint" id="deconInfo">Acquire shots, then look for a repeat peak in the autocorrelation.</div>
+          <canvas id="deconCanvas" class="selected-gather" width="1100" height="360" aria-label="Autocorrelation before and after deconvolution"></canvas>
+          <div class="note">A multiple repeats; a primary does not. The autocorrelation of a reverberating trace peaks at the repeat period, and setting the prediction lag there subtracts what was predictable from that far back. Switch the surface boundary to <b>absorbing</b> and re-acquire to see the same data with no multiples at all — that is the target deconvolution is trying to reach from the free-surface data.</div>
         </div>
         <div id="spectrumView" style="display:none">
           <div class="toolbar">
@@ -365,6 +392,11 @@
             <div class="hint" id="cvsInfo">Click a panel to pick that velocity at the current t₀.</div>
           </div>
           <div class="nmo-pane">
+            <p class="ttl">Amplitude versus angle (acoustic)</p>
+            <canvas id="avoCanvas" width="560" height="430" aria-label="Measured amplitude versus incidence angle against the acoustic Zoeppritz prediction"></canvas>
+            <div class="hint" id="avoInfo">Pick an event on the raw CMP to measure its amplitude against offset.</div>
+          </div>
+          <div class="nmo-pane">
             <p class="ttl">Dix interval velocities</p>
             <canvas id="dixCanvas" width="560" height="430" aria-label="Dix interval velocity inversion"></canvas>
             <div class="hint" id="dixInfo">Pick velocities, or switch to Model RMS, to invert.</div>
@@ -390,6 +422,7 @@
             <label>mute vel <input class="compact-range" type="range" id="muteVel" min="600" max="6000" step="50" value="1800"><span id="muteVelLbl" class="metric">1800 m/s</span></label>
             <label><input type="checkbox" id="nmoDensity" checked> variable-density backdrop</label>
             <label><input type="checkbox" id="exactMoveout" checked> exact layered-model curve</label>
+            <label><input type="checkbox" id="showMultiples" checked> predicted multiples</label>
           </div>
           <div class="hint" id="nmoInfo">Bright spots mark coherent reflections.</div><div class="hint" id="pickList"></div>
         </div>
@@ -413,6 +446,9 @@
         <p class="ttl" id="finalTitle">CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span></p>
         <canvas id="finalSection" width="1040" height="520" aria-label="Unmigrated two-dimensional CMP stack"></canvas>
         <div class="hint" id="finalDisplayInfo">Robust 98.5% clipping and √t compensation reveal later reflections without changing the processed stack samples.</div>
+        <p class="ttl" style="margin-top:10px">Velocity field driving this section</p>
+        <canvas id="velocityField" width="1040" height="190" aria-label="Interpolated stacking velocity field"></canvas>
+        <div class="hint" id="velocityFieldInfo">Pick velocities at two or more CMPs, or choose Model RMS, to see the field.</div>
         <p class="ttl" style="margin-top:8px">Fold</p>
         <canvas id="finalFold" width="1040" height="110" aria-label="Fold aligned to final CMP stack"></canvas>
         <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
@@ -865,7 +901,9 @@ function finalizeShot(){
 let dataVersion=0;
 function buildTraceDatabase(){
   acquisitionTraces=[];dataVersion++;cvsCache=null;
-  shotRecords.forEach(shot=>shot.receivers.forEach((receiver,k)=>{
+  shotRecords.forEach(shot=>{
+  const deconDesign=designDeconForShot(shot);
+  shot.receivers.forEach((receiver,k)=>{
     const sourceX=shot.sourceX, receiverX=receiver.x;
     const sourceReceiverOffset=receiverX-sourceX;
     const midpointX=(sourceX+receiverX)/2;
@@ -877,13 +915,20 @@ function buildTraceDatabase(){
     const doFilter=filterEnabled&&validFilterCorners(filterCorners);
     const noiseAmplitude=noiseLevel*(shot.signalRms||0);
     const noiseSource=noiseAmplitude>0&&shot.noise?shot.noise[k]:null;
-    let unfiltered=raw,noiseRaw=null;
+    let noiseRaw=null;
     if(noiseSource){
-      noiseRaw=new Float32Array(shot.nt);unfiltered=new Float32Array(shot.nt);
-      for(let i=0;i<shot.nt;i++){noiseRaw[i]=noiseSource[i]*noiseAmplitude;unfiltered[i]=raw[i]+noiseRaw[i];}
+      noiseRaw=new Float32Array(shot.nt);
+      for(let i=0;i<shot.nt;i++)noiseRaw[i]=noiseSource[i]*noiseAmplitude;
     }
-    const cleanPart=doFilter?bandpassFilter(raw,shot.dt,filterCorners):raw;
-    const noisePart=noiseRaw?(doFilter?bandpassFilter(noiseRaw,shot.dt,filterCorners):noiseRaw):null;
+    const deconvolve=trace=>deconDesign?applyPredictionErrorFilter(trace,deconDesign.operator,deconDesign.lag):trace;
+    const cleanDecon=deconvolve(raw),noiseDecon=noiseRaw?deconvolve(noiseRaw):null;
+    let unfiltered=cleanDecon;
+    if(noiseDecon){
+      unfiltered=new Float32Array(shot.nt);
+      for(let i=0;i<shot.nt;i++)unfiltered[i]=cleanDecon[i]+noiseDecon[i];
+    }
+    const cleanPart=doFilter?bandpassFilter(cleanDecon,shot.dt,filterCorners):cleanDecon;
+    const noisePart=noiseDecon?(doFilter?bandpassFilter(noiseDecon,shot.dt,filterCorners):noiseDecon):null;
     let samples=cleanPart;
     if(noisePart){
       samples=new Float32Array(shot.nt);
@@ -897,7 +942,8 @@ function buildTraceDatabase(){
       samples,
       dt:shot.dt, nt:shot.nt
     });
-  }));
+  });
+  });
 }
 
 function cmpIndexForMidpoint(midpointX,binSize=cmpBinSize){
@@ -1427,6 +1473,123 @@ function signalRmsOfShot(traceList){
 
 function noiseSnrDb(){return noiseLevel>0?20*Math.log10(1/noiseLevel):Infinity;}
 
+/* ---------------- deconvolution ---------------- */
+/* Multiples are generated by the free surface and can be switched off at the
+   boundary, but switching them off is not processing. Predictive deconvolution
+   removes them from data that has them, by exploiting the one thing that makes
+   a multiple a multiple: it repeats. A reverberation that recurs every P
+   seconds is predictable from itself P seconds earlier, so subtracting that
+   prediction leaves the part that was not predictable -- the primaries.
+
+   Offshore this is close to ideal: the water column rings with a period set by
+   the water depth, and the autocorrelation shows that period directly. */
+let deconEnabled=false,deconMode='predictive',deconLagMs=0,deconOperatorMs=40,deconPrewhiten=1;
+
+function autocorrelation(samples,maxLag){
+  const n=nextPow2(samples.length*2),re=new Float64Array(n),im=new Float64Array(n);
+  for(let i=0;i<samples.length;i++)re[i]=samples[i];
+  fftRadix2(re,im,false);
+  for(let k=0;k<n;k++){const power=re[k]*re[k]+im[k]*im[k];re[k]=power;im[k]=0;}
+  fftRadix2(re,im,true);
+  const out=new Float64Array(maxLag+1);
+  for(let k=0;k<=maxLag;k++)out[k]=re[k];
+  return out;
+}
+
+/* Levinson recursion for a symmetric Toeplitz system T x = b, T built from the
+   first column r. O(n^2) rather than the O(n^3) of a general solve, which is
+   what makes a long prediction operator affordable. */
+function levinsonSolve(r,b){
+  const n=b.length,x=new Float64Array(n),y=new Float64Array(n);
+  if(n===0||r[0]===0)return x;
+  x[0]=b[0]/r[0];
+  if(n===1)return x;
+  y[0]=-r[1]/r[0];
+  let beta=r[0],alpha=-r[1]/r[0];
+  for(let k=1;k<n;k++){
+    beta=(1-alpha*alpha)*beta;
+    if(!Number.isFinite(beta)||Math.abs(beta)<1e-30)break;
+    let sum=0;
+    for(let i=0;i<k;i++)sum+=r[k-i]*x[i];
+    const mu=(b[k]-sum)/beta;
+    const previousY=y.slice(0,k);
+    for(let i=0;i<k;i++)x[i]+=mu*previousY[k-1-i];
+    x[k]=mu;
+    if(k<n-1){
+      let s=0;
+      for(let i=0;i<k;i++)s+=r[k-i]*previousY[i];
+      alpha=-(r[k+1]+s)/beta;
+      for(let i=0;i<k;i++)y[i]=previousY[i]+alpha*previousY[k-1-i];
+      y[k]=alpha;
+    }
+  }
+  return x;
+}
+
+/* The prediction error filter is sparse -- a leading 1, a gap of `lag` zeros,
+   then the operator -- so applying it costs nt x operatorLength rather than a
+   full convolution against a filter hundreds of samples long. */
+function applyPredictionErrorFilter(samples,operator,lag){
+  const n=samples.length,out=new Float32Array(n),taps=operator.length;
+  for(let i=0;i<n;i++){
+    let value=samples[i];
+    for(let k=0;k<taps;k++){
+      const j=i-lag-k;
+      if(j<0)break;
+      value-=operator[k]*samples[j];
+    }
+    out[i]=value;
+  }
+  return out;
+}
+
+/* Search the MAGNITUDE, not the value. A free surface reflects with R = -1, so
+   successive multiple orders alternate polarity and the repeat appears as a
+   strong NEGATIVE autocorrelation peak; looking only for positive maxima finds
+   twice the period instead of the period. Predictive decon is indifferent to
+   the sign -- the operator absorbs it. */
+function suggestPredictionLagSeconds(autocorr,dt,minSeconds){
+  const start=Math.max(2,Math.round(minSeconds/dt));
+  let best=-1,bestValue=0;
+  for(let k=start;k<autocorr.length-1;k++){
+    const value=Math.abs(autocorr[k]);
+    if(value>Math.abs(autocorr[k-1])&&value>=Math.abs(autocorr[k+1])&&value>bestValue){bestValue=value;best=k;}
+  }
+  return best>0?best*dt:null;
+}
+
+/* One filter per shot, designed from a spread of its traces rather than all of
+   them: the statistics converge quickly and the cost is dominated by the FFTs.
+   Design uses what was actually recorded, noise included, because that is the
+   data a real processor would have. */
+function designDeconForShot(shot){
+  if(!deconEnabled)return null;
+  const lagSamples=deconMode==='spiking'?1:Math.max(1,Math.round(deconLagMs/1000/shot.dt));
+  const operatorSamples=Math.max(2,Math.min(400,Math.round(deconOperatorMs/1000/shot.dt)));
+  const maxLag=lagSamples+operatorSamples+1;
+  if(maxLag>=shot.nt)return null;
+  const noiseAmplitude=noiseLevel*(shot.signalRms||0);
+  const stride=Math.max(1,Math.floor(shot.traces.length/12));
+  let sum=null,used=0;
+  for(let k=0;k<shot.traces.length;k+=stride){
+    let design=shot.traces[k];
+    if(noiseAmplitude>0&&shot.noise&&shot.noise[k]){
+      design=new Float32Array(shot.nt);
+      for(let i=0;i<shot.nt;i++)design[i]=shot.traces[k][i]+shot.noise[k][i]*noiseAmplitude;
+    }
+    const ac=autocorrelation(design,maxLag);
+    if(!sum)sum=new Float64Array(maxLag+1);
+    for(let i=0;i<=maxLag;i++)sum[i]+=ac[i];
+    used++;
+  }
+  if(!sum||!used||sum[0]<=0)return null;
+  const design=Float64Array.from(sum);
+  design[0]*=1+Math.max(0,deconPrewhiten)/100;   // stabilise the inversion
+  const r=design.slice(0,operatorSamples),g=new Float64Array(operatorSamples);
+  for(let i=0;i<operatorSamples;i++)g[i]=design[lagSamples+i];
+  return {operator:levinsonSolve(r,g),lag:lagSamples,autocorr:sum,tracesUsed:used};
+}
+
 let filterEnabled=false,filterCorners=[5,10,45,60];
 function validFilterCorners(c){return c.length===4&&c.every(v=>Number.isFinite(v)&&v>=0)&&c[0]<c[1]&&c[1]<c[2]&&c[2]<c[3];}
 
@@ -1464,8 +1627,23 @@ function orderRecords(records,axis){
   return records.slice().sort((a,b)=>{
     if(axis==='receiver') return a.receiverX-b.receiverX;
     if(axis==='shot') return a.sourceX-b.sourceX;
+    if(axis==='midpoint') return a.midpointX-b.midpointX;
     return a.sourceReceiverOffset-b.sourceReceiverOffset;
   });
+}
+
+/* Common offset: every trace recorded at (nearly) the same source-receiver
+   distance, laid out by midpoint. It is the one sort that reads like a section
+   before any processing -- structure is visible directly, because the moveout
+   that distorts a CMP gather is constant across the whole display. */
+function offsetBinsAvailable(binWidth){
+  const bins=new Map();
+  acquisitionTraces.forEach(trace=>{
+    const key=Math.round(trace.sourceReceiverOffset/binWidth);
+    if(!bins.has(key))bins.set(key,[]);
+    bins.get(key).push(trace);
+  });
+  return bins;
 }
 
 /* Shared renderer for CSP, CRG, CMP and NMO panels. Trace arrays always remain
@@ -1537,13 +1715,33 @@ function drawTraceGather(canvas,records,options={}){
   });
   ctx.fillStyle='#8a949f';
   const axis=options.axis||'offset';
-  const value=r=>axis==='receiver'?r.receiverX:axis==='shot'?r.sourceX:r.sourceReceiverOffset;
+  const value=r=>axis==='receiver'?r.receiverX:axis==='shot'?r.sourceX:axis==='midpoint'?r.midpointX:r.sourceReceiverOffset;
   const first=value(ordered[0]),last=value(ordered[n-1]);
   ctx.fillText(`${first.toFixed(0)} m`,L,H-8);const lastText=`${last.toFixed(0)} m`;ctx.fillText(lastText,W-R-ctx.measureText(lastText).width,H-8);
-  const title=options.title||({receiver:'receiver x',shot:'shot x',offset:'signed offset'}[axis]);ctx.fillText(title,L,13);
+  const title=options.title||({receiver:'receiver x',shot:'shot x',midpoint:'CMP midpoint x',offset:'signed offset'}[axis]);ctx.fillText(title,L,13);
   if(options.hyperbola){
     const {t0,velocity}=options.hyperbola;ctx.strokeStyle='#ff6b6b';ctx.lineWidth=1.5;ctx.setLineDash([5,3]);ctx.beginPath();
     ordered.forEach((r,k)=>{const time=moveoutTime(t0,r.sourceReceiverOffset,velocity,options.hyperbola.delay??sourceWaveletDelay());const x=L+dxTr*(k+.5),y=T+time/duration*ph;k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();ctx.setLineDash([]);
+  }
+  if(options.extraCurves){
+    options.extraCurves.forEach(curve=>{
+      ctx.strokeStyle=curve.color||'#ff8fd0';ctx.lineWidth=curve.width||1.3;ctx.setLineDash(curve.dash||[3,4]);
+      ctx.beginPath();let drawing=false;
+      ordered.forEach((record,k)=>{
+        const time=curve.time(record);
+        if(time===null||!Number.isFinite(time)||time>duration){drawing=false;return;}
+        const x=L+dxTr*(k+.5),y=T+time/duration*ph;
+        drawing?ctx.lineTo(x,y):ctx.moveTo(x,y);drawing=true;
+      });
+      ctx.stroke();ctx.setLineDash([]);
+      if(curve.label){
+        const anchor=ordered[0]?curve.time(ordered[0]):null;
+        if(anchor!==null&&Number.isFinite(anchor)&&anchor<duration){
+          ctx.fillStyle=curve.color||'#ff8fd0';ctx.font='9px ui-sans-serif';
+          ctx.fillText(curve.label,L+3,T+anchor/duration*ph-3);
+        }
+      }
+    });
   }
   if(options.referenceCurve){
     ctx.strokeStyle=options.referenceColor||'#ffc857';ctx.lineWidth=1.5;ctx.setLineDash([2,3]);ctx.beginPath();let drawing=false;
@@ -1818,6 +2016,8 @@ function drawAcquisitionViews(){
   document.getElementById('receiverInfo').textContent=receiver?`Common Receiver Gather · R${receiver.id} · x = ${receiver.i*DX} m · Fold = ${receiverRecords.length} shots`:'No receiver selected.';
   document.querySelectorAll('.shot-card canvas').forEach(cv=>drawTraceGather(cv,cv._traceRecords||[],{compact:true,axis:document.getElementById('shotAxis').value}));
   if(spectrumViewVisible())drawSpectrum();
+  if(offsetViewVisible()){refreshOffsetBins();drawOffsetGather();}
+  if(deconViewVisible())drawDeconPanel();
 }
 
 function renderModelFrame(){mc.clearRect(0,0,CW,CH);drawModel();drawAcquisitionSchematic();}
@@ -2404,6 +2604,175 @@ function drawConstantVelocityStacks(){
   ctx.fillText(`t₀ ${selectedHyperbolaT0.toFixed(2)} s`,L+pw-70,14);
 }
 
+/* ---------------- amplitude versus angle ---------------- */
+/* HONEST SCOPE. The solver is acoustic, so this is fluid-fluid AVO: the
+   reflection coefficient genuinely varies with angle, and the critical angle is
+   real and observable. What is NOT here is any shear response -- no Poisson
+   ratio, so none of the Class I-IV gas-sand behaviour that "AVO" usually means
+   in interpretation. The angle dependence below is exact for the medium being
+   modelled; it is simply a medium without shear.
+
+   Exact acoustic reflection coefficient at incidence angle t1, with the
+   transmission angle from Snell's law:
+       R = (Z2/cos t2 - Z1/cos t1) / (Z2/cos t2 + Z1/cos t1)
+   Past the critical angle (only when V2 > V1) cos t2 turns imaginary, the wave
+   is totally reflected, and |R| = 1. */
+function acousticReflectionCoefficient(theta1,v1,rho1,v2,rho2){
+  const s1=Math.sin(theta1),s2=s1*v2/v1;
+  if(Math.abs(s2)>=1)return{R:1,critical:true};
+  const c1=Math.cos(theta1),c2=Math.sqrt(1-s2*s2);
+  const a=v2*rho2/c2,b=v1*rho1/c1;
+  return{R:(a-b)/(a+b),critical:false};
+}
+function criticalAngleFor(v1,v2){return v2>v1?Math.asin(v1/v2):null;}
+
+/* Straight-ray angle estimate: with the RMS velocity giving an equivalent
+   depth, the half-offset and that depth define the incidence angle. Standard,
+   and adequate well past the offsets this survey reaches. */
+function incidenceAngleFor(offset,t0,velocityRms){
+  const physical=Math.max(1e-6,t0-sourceWaveletDelay());
+  const depth=velocityRms*physical/2;
+  return Math.atan(Math.abs(offset)/2/Math.max(1e-6,depth));
+}
+
+/* The interface the picked event belongs to, chosen as the model reflector
+   whose predicted time is nearest the pick. */
+function interfaceNearTime(midpointX,t0){
+  const segments=modelVerticalSegmentsAt(midpointX),delay=sourceWaveletDelay();
+  let t=delay,best=null;
+  for(let k=0;k<segments.length;k++){
+    t+=segments[k].intervalT;
+    const below=k+1<segments.length?segments[k+1]:{layerIndex:layers.length-1,velocity:layers[layers.length-1].vp};
+    const entry={time:t,above:segments[k],below,gap:Math.abs(t-t0)};
+    if(!best||entry.gap<best.gap)best=entry;
+  }
+  return best;
+}
+
+function avoObservations(){
+  const records=selectedCmpTraces();
+  if(!records.length||selectedCmpIndex===null)return null;
+  const midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,t0=selectedHyperbolaT0;
+  const velocity=vAt(t0,midpointX),reference=interfaceNearTime(midpointX,t0);
+  if(!(velocity>0)||!reference)return null;
+  const searchSeconds=.35/f0;
+  const points=[];
+  records.forEach(record=>{
+    const predicted=moveoutTime(t0,record.sourceReceiverOffset,velocity);
+    const centre=Math.round(predicted/record.dt),radius=Math.max(1,Math.round(searchSeconds/record.dt));
+    let best=-1,bestAbs=-1;
+    for(let a=Math.max(0,centre-radius);a<=Math.min(record.nt-1,centre+radius);a++){
+      const value=Math.abs(record.samples[a]);
+      if(value>bestAbs){bestAbs=value;best=a;}
+    }
+    if(best<0)return;
+    points.push({offset:Math.abs(record.sourceReceiverOffset),
+      angle:incidenceAngleFor(record.sourceReceiverOffset,t0,velocity),
+      amplitude:record.samples[best]});
+  });
+  if(points.length<3)return null;
+  points.sort((a,b)=>a.angle-b.angle);
+  const above=reference.above,below=reference.below;
+  const rho1=above.layerIndex<0?WATER_RHO:layers[above.layerIndex].rho;
+  const rho2=below.layerIndex<0?WATER_RHO:layers[below.layerIndex].rho;
+  return{points,t0,midpointX,velocity,
+    v1:above.velocity,rho1,v2:below.velocity,rho2,
+    interfaceTime:reference.time,
+    critical:criticalAngleFor(above.velocity,below.velocity)};
+}
+
+/* Round an axis limit up to a readable 1/2/5 x 10^n step so the gridline
+   labels stay legible whatever the normalisation happens to produce. */
+function niceCeiling(value){
+  if(!(value>0)||!isFinite(value))return 1;
+  const magnitude=Math.pow(10,Math.floor(Math.log10(value)));
+  const scaled=value/magnitude;
+  const step=scaled<=1?1:scaled<=2?2:scaled<=5?5:10;
+  return step*magnitude;
+}
+
+function drawAvoPanel(){
+  const cv=document.getElementById('avoCanvas');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('avoInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  const L=52,R=14,T=22,B=40,pw=W-L-R,ph=H-T-B;
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  const data=avoObservations();
+  if(!data){
+    ctx.fillStyle='#8a949f';ctx.fillText('Select a CMP and pick an event on the raw gather.',L,T+20);
+    info.textContent='Pick an event on the raw CMP to measure its amplitude against offset.';
+    return;
+  }
+  const maxAngle=Math.max(.18,Math.min(Math.PI/2*.98,Math.max(...data.points.map(p=>p.angle))*1.12));
+  const xOf=angle=>L+Math.max(0,Math.min(1,angle/maxAngle))*pw;
+  /* Measured and predicted are normalised to their own value at the smallest
+     available angle. Absolute amplitudes carry geometric spreading and
+     transmission loss through everything above, which the reflection
+     coefficient does not describe -- the comparable quantity is the TREND. */
+  const nearest=data.points[0];
+  const measuredReference=Math.abs(nearest.amplitude)||1;
+  const predictedAt=angle=>acousticReflectionCoefficient(angle,data.v1,data.rho1,data.v2,data.rho2);
+  const predictedReference=Math.abs(predictedAt(nearest.angle).R)||1;
+  /* Past the critical angle |R| saturates at 1, which normalised by a small
+     near-offset reflection coefficient can be several times the near-offset
+     value. A fixed ceiling would flat-line both curves against the top edge and
+     hide exactly the behaviour worth seeing, so the axis follows the data. */
+  const curveSamples=Array.from({length:161},(_,k)=>Math.abs(predictedAt(k/160*maxAngle).R)/predictedReference);
+  const measuredSamples=data.points.map(point=>Math.abs(point.amplitude)/measuredReference);
+  const yTop=niceCeiling(Math.max(1.2,...curveSamples,...measuredSamples)*1.08);
+  const yOf=value=>T+ph-Math.max(0,Math.min(yTop,value))/yTop*ph;
+
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
+  for(let q=0;q<=4;q++){
+    const value=q/4*yTop,y=yOf(value);
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText(value.toFixed(value<10?1:0),12,y+3);
+  }
+  for(let deg=0;deg<=maxAngle*180/Math.PI;deg+=10){
+    const x=xOf(deg*Math.PI/180);
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    ctx.textAlign='center';ctx.fillText(String(deg),x,T+ph+14);ctx.textAlign='left';
+  }
+  ctx.fillStyle='#8a949f';ctx.textAlign='center';
+  ctx.fillText('incidence angle (degrees)',L+pw/2,H-6);ctx.textAlign='left';
+  ctx.save();ctx.translate(11,T+ph/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';
+  ctx.fillText('|amplitude| normalised at near offset',0,0);ctx.restore();
+
+  if(data.critical!==null&&data.critical<maxAngle){
+    const x=xOf(data.critical);
+    ctx.strokeStyle='rgba(255,107,107,.8)';ctx.setLineDash([4,3]);ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#ff6b6b';ctx.fillText('critical',x+3,T+11);
+  }
+
+  ctx.strokeStyle='#ffc857';ctx.lineWidth=1.6;ctx.beginPath();
+  for(let k=0;k<=160;k++){
+    const angle=k/160*maxAngle,value=Math.abs(predictedAt(angle).R)/predictedReference;
+    const x=xOf(angle),y=yOf(value);
+    k?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle='#7fd3ff';
+  data.points.forEach(point=>{
+    const x=xOf(point.angle),y=yOf(Math.abs(point.amplitude)/measuredReference);
+    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
+  });
+
+  ctx.fillStyle='#ffc857';ctx.fillText('exact acoustic Zoeppritz',L+6,T+12);
+  ctx.fillStyle='#7fd3ff';ctx.fillText('measured',L+6,T+24);
+
+  const normalR=acousticReflectionCoefficient(0,data.v1,data.rho1,data.v2,data.rho2).R;
+  const widest=data.points[data.points.length-1];
+  const measuredTrend=Math.abs(widest.amplitude)/measuredReference;
+  const predictedTrend=Math.abs(predictedAt(widest.angle).R)/predictedReference;
+  info.innerHTML=`t₀ ${data.t0.toFixed(3)} s · interface ${data.v1.toFixed(0)}→${data.v2.toFixed(0)} m/s · R(0) ${normalR.toFixed(3)}`+
+    (data.critical!==null?` · critical ${(data.critical*180/Math.PI).toFixed(0)}°`:' · no critical angle (slower below)')+
+    `<br>at ${(widest.angle*180/Math.PI).toFixed(0)}°: measured ×${measuredTrend.toFixed(2)}, predicted ×${predictedTrend.toFixed(2)} of near-offset`+
+    `<br><span class="warning">Acoustic only — no shear, so no Poisson-driven Class I–IV response. Measured amplitudes also carry spreading and transmission loss, which R does not.</span>`;
+}
+
 /* ---------------- Dix inversion ---------------- */
 /* RMS (stacking) velocities describe the whole column above a reflector. The
    layer velocities are recovered between successive picks with Dix:
@@ -2511,6 +2880,51 @@ function drawDixPanel(){
     ' Gold is the true interval velocity of the model at this midpoint.';
 }
 
+/* Predicted multiples.
+   A free surface returns R = -1, so any reflection can bounce back down and be
+   recorded again at roughly twice its one-way path. Offshore the water column
+   does this repeatedly and periodically, which is what makes marine multiples
+   both so recognisable and so damaging.
+   These curves are PREDICTIONS from the model, drawn so a multiple can be
+   identified before anything is done about it. Two families:
+     - the water-bottom series offshore, orders 1..3, moving out at the water
+       velocity because the extra path is entirely in water;
+     - the first-order surface multiple of whatever event is currently picked,
+       which arrives at twice its physical zero-offset time.
+   Both vanish when the top boundary is set to absorbing, which is the check
+   that they are multiples and not something else. */
+let showMultiples=true;
+
+function waterBottomMultipleCurves(midpointX){
+  if(!isOffshore()||topBoundary!=='free')return [];
+  const delay=sourceWaveletDelay(),segments=modelVerticalSegmentsAt(midpointX);
+  const water=segments[0];
+  if(!water||water.layerIndex!==-1)return [];
+  const curves=[];
+  for(let order=1;order<=3;order++){
+    const physical=water.intervalT*(order+1);
+    curves.push({
+      color:order===1?'#ff8fd0':'rgba(255,143,208,.5)',
+      dash:[3,4],width:order===1?1.5:1,
+      label:order===1?'water-bottom multiple ×1':null,
+      time:record=>moveoutTime(delay+physical,record.sourceReceiverOffset,WATER_VP,delay)
+    });
+  }
+  return curves;
+}
+
+function surfaceMultipleCurve(t0,midpointX){
+  if(topBoundary!=='free')return [];
+  const delay=sourceWaveletDelay(),physical=Math.max(0,t0-delay);
+  if(physical<=0)return [];
+  const velocity=vAt(t0,midpointX);
+  if(!(velocity>0))return [];
+  return [{
+    color:'#c58cff',dash:[6,4],width:1.4,label:'surface multiple of picked event',
+    time:record=>moveoutTime(delay+2*physical,record.sourceReceiverOffset,velocity,delay)
+  }];
+}
+
 function drawNmo(){
   const records=selectedCmpTraces();
   document.getElementById('nmoCmpTitle').textContent=selectedCmpIndex===null?'No CMP selected':
@@ -2519,7 +2933,7 @@ function drawNmo(){
   if(!records.length){
     [document.getElementById('nmoRaw'),document.getElementById('nmoCor'),document.getElementById('nmoStk')].forEach(cv=>drawTraceGather(cv,[],{empty:'Build and select a CMP'}));
     sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);
-    drawConstantVelocityStacks();drawDixPanel();
+    drawConstantVelocityStacks();drawDixPanel();drawAvoPanel();
     document.getElementById('stackSnrInfo').textContent='live-fold mean';return;
   }
   ensureSemblance();drawSemb();
@@ -2527,7 +2941,11 @@ function drawNmo(){
   const seismicDisplay={axis:'offset',suppressCmpHighlight:true,variableDensity:nmoDensity,densityColor:true,amax:displayAmax,displayGain:nmoDisplayGain,clipTraces:true,positiveFill:false,lineWidth:1.2};
   const exactCurve=showExactMoveout&&!modelHasLateralVariation()?record=>exactModelMoveoutTime(selectedHyperbolaT0,record.sourceReceiverOffset,midpointX):null;
   const liveMute=activeTopMute();
+  const multipleCurves=showMultiples
+    ?waterBottomMultipleCurves(midpointX).concat(surfaceMultipleCurve(selectedHyperbolaT0,midpointX))
+    :[];
   drawTraceGather(document.getElementById('nmoRaw'),records,{...seismicDisplay,traceColor:'#9de4ff',hyperbola:{t0:selectedHyperbolaT0,velocity:activeVelocity},referenceCurve:exactCurve,
+    extraCurves:multipleCurves,
     muteCurve:liveMute?record=>topMuteTimeFor(liveMute,record.sourceReceiverOffset):null});
   drawTraceGather(document.getElementById('nmoCor'),result.correctedRecords,{...seismicDisplay,traceColor:'#9effc5',valid:result.valid,title:'signed offset · muted shaded'});
   const base=records[0],stackRecord=stack?{...base,shotId:0,receiverId:0,sourceReceiverOffset:0,samples:stack.samples,nt:stack.nt,dt:stack.dt}:null;
@@ -2535,9 +2953,13 @@ function drawNmo(){
   const residual=hyperbolaResidualStats(records,selectedHyperbolaT0,activeVelocity),nearest=Math.min(...records.map(r=>Math.abs(r.sourceReceiverOffset))),hasZero=nearest<1e-6;
   const snap=hyperbolaSnapInfo?` · snap ${hyperbolaSnapInfo.delta>=0?'+':''}${(hyperbolaSnapInfo.delta*1000).toFixed(0)} ms`:'';
   const residualText=residual?` · local residual RMS ${(residual.rms*1000).toFixed(0)} ms, bias ${residual.bias>=0?'+':''}${(residual.bias*1000).toFixed(0)} ms (${residual.count} traces)`:'';
+  const multipleText=!showMultiples?'multiple prediction off'
+    :topBoundary!=='free'?'absorbing top — no multiples to predict'
+    :multipleCurves.length?`${multipleCurves.length} predicted multiple curve${multipleCurves.length===1?'':'s'} (pink = water bottom, violet = surface multiple of the pick)`
+    :'no multiples predicted here';
   const exactText=!showExactMoveout?'gold model curve off':modelHasLateralVariation()?'gold exact curve unavailable for laterally varying interfaces':'gold = exact layered-model reference';
-  document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span>`;
-  drawConstantVelocityStacks();drawDixPanel();
+  document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span><br><span style="color:#ff8fd0">${multipleText}</span>`;
+  drawConstantVelocityStacks();drawDixPanel();drawAvoPanel();
   const snr=stackSnrReport(),snrEl=document.getElementById('stackSnrInfo');
   snrEl.innerHTML=snr
     ?`SNR <b>${snr.traceSnr.toFixed(1)} dB</b> mean trace &rarr; <b>${snr.stackSnr.toFixed(1)} dB</b> stacked · gain <b>${snr.gain>=0?'+':''}${snr.gain.toFixed(1)} dB</b>`+
@@ -3051,6 +3473,86 @@ function runMigration(){
   document.getElementById('finalInfo').textContent=`Migrated ${migratedStacks.size} CMP bins in ${(performance.now()-started).toFixed(0)} ms · aperture ${migrationAperture} m (±${lags} bins) · ${document.getElementById('allVelocity').value==='model'?'model RMS':'picked/constant'} migration velocity. Compare against Stack and Model TWT.`;
 }
 
+/* The velocity field the whole line is processed with. Picking happens one CMP
+   at a time, so without this the interpolation between picked locations -- the
+   thing that actually drives NMO and migration everywhere else -- is invisible.
+   Colour is velocity; the ticks mark where a real pick exists, and everything
+   between them is inferred. */
+function drawVelocityFieldPanel(){
+  const cv=document.getElementById('velocityField');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('velocityFieldInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  const L=48,R=64,T=16,B=26,pw=W-L-R,ph=H-T-B;
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  const range=finalRange||(keys.length?{min:keys[0],max:keys[keys.length-1]}:null);
+  const mode=document.getElementById('allVelocity').value,field=pickedVelocityField(),located=pickedCmpIndices();
+  const source=mode==='model'?'model':mode==='field'&&field?'field':picks.length?'shared':null;
+  if(!range||!source){
+    ctx.fillStyle='#8a949f';
+    ctx.fillText(range?'Pick velocities at two or more CMPs, or choose Model RMS at each CMP.':'Build CMP gathers first.',L,T+18);
+    info.textContent='Pick velocities at two or more CMPs, or choose Model RMS, to see the field.';
+    return;
+  }
+  const {min,max}=range,count=max-min+1;
+  const velocityAt=(t0,index)=>source==='model'?modelVAt(t0,cmpOrigin+index*cmpBinSize)
+    :source==='field'?field(t0,index)
+    :interpolateVelocity(picks,t0,vnmo);
+  // scan once for the range, so the colour ramp uses the field's own extremes
+  let vLo=Infinity,vHi=-Infinity;
+  for(let x=0;x<pw;x+=3)for(let y=0;y<ph;y+=3){
+    const v=velocityAt(y/Math.max(1,ph-1)*tmax,min+Math.min(count-1,Math.floor(x/pw*count)));
+    if(Number.isFinite(v)){vLo=Math.min(vLo,v);vHi=Math.max(vHi,v);}
+  }
+  if(!Number.isFinite(vLo)||vHi-vLo<1){vLo=sembVmin;vHi=sembVmax;}
+  const image=ctx.createImageData(pw,ph),pixels=image.data;
+  const stops=[[49,54,149],[69,117,180],[171,217,233],[254,224,144],[244,109,67],[165,0,38]];
+  for(let y=0;y<ph;y++){
+    const t0=y/Math.max(1,ph-1)*tmax;
+    for(let x=0;x<pw;x++){
+      const v=velocityAt(t0,min+Math.min(count-1,Math.floor(x/pw*count)));
+      const u=Math.max(0,Math.min(1,(v-vLo)/(vHi-vLo))),f=u*(stops.length-1);
+      const i0=Math.min(stops.length-2,Math.floor(f)),w=f-i0,o=(y*pw+x)*4;
+      pixels[o]=Math.round(stops[i0][0]*(1-w)+stops[i0+1][0]*w);
+      pixels[o+1]=Math.round(stops[i0][1]*(1-w)+stops[i0+1][1]*w);
+      pixels[o+2]=Math.round(stops[i0][2]*(1-w)+stops[i0+1][2]*w);
+      pixels[o+3]=255;
+    }
+  }
+  ctx.putImageData(image,L,T);
+  // where a genuine pick exists, versus where the field is inferred
+  if(source==='field'){
+    located.forEach(index=>{
+      if(index<min||index>max)return;
+      const x=L+(index-min+.5)/count*pw;
+      ctx.strokeStyle='#0b0e12';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+      ctx.strokeStyle='#7dff9b';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+      ctx.fillStyle='#7dff9b';ctx.fillRect(x-3,T-5,6,4);
+    });
+  }
+  ctx.strokeStyle='rgba(35,42,51,.7)';ctx.fillStyle='#a0abb6';
+  for(let t=0;t<=tmax+1e-6;t+=.2){const y=T+t/tmax*ph;ctx.fillText(t.toFixed(1),4,y+3);}
+  ctx.fillText(`${(cmpOrigin+min*cmpBinSize).toFixed(0)} m`,L,H-8);
+  const right=`${(cmpOrigin+max*cmpBinSize).toFixed(0)} m`;
+  ctx.fillText(right,L+pw-ctx.measureText(right).width,H-8);
+  // colour bar
+  const barX=L+pw+14,barW=14;
+  for(let y=0;y<ph;y++){
+    const u=1-y/Math.max(1,ph-1),f=u*(stops.length-1),i0=Math.min(stops.length-2,Math.floor(f)),w=f-i0;
+    ctx.fillStyle=`rgb(${Math.round(stops[i0][0]*(1-w)+stops[i0+1][0]*w)},${Math.round(stops[i0][1]*(1-w)+stops[i0+1][1]*w)},${Math.round(stops[i0][2]*(1-w)+stops[i0+1][2]*w)})`;
+    ctx.fillRect(barX,T+y,barW,1);
+  }
+  ctx.fillStyle='#a0abb6';
+  ctx.fillText(vHi.toFixed(0),barX+barW+3,T+8);
+  ctx.fillText(vLo.toFixed(0),barX+barW+3,T+ph);
+  info.textContent=source==='model'
+    ? `Model RMS evaluated at every midpoint · ${vLo.toFixed(0)}–${vHi.toFixed(0)} m/s. This uses the answer, so it is a reference, not a result.`
+    : source==='field'
+      ? `Interpolated from ${located.length} picked CMP${located.length===1?'':'s'} (green ticks) · ${vLo.toFixed(0)}–${vHi.toFixed(0)} m/s. Everything between the ticks is inferred.`
+      : `One picked function applied to every CMP · ${vLo.toFixed(0)}–${vHi.toFixed(0)} m/s. Laterally constant by construction.`;
+}
+
 let finalImg=null;
 
 function finalTimeGainFactor(t,mode){
@@ -3206,6 +3708,7 @@ function drawFinalSection(){
   const cv=document.getElementById('finalSection'),ctx=cv.getContext('2d'),foldCv=document.getElementById('finalFold'),fc=foldCv.getContext('2d');
   const W=cv.width,H=cv.height,L=48,R=12,T=28,B=28,pw=W-L-R,ph=H-T-B;
   updateFinalViewControls();ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);fc.fillStyle='#0b0e12';fc.fillRect(0,0,foldCv.width,foldCv.height);
+  drawVelocityFieldPanel();
   const cmpKeys=[...cmpBins.keys()].sort((a,b)=>a-b),range=finalRange||(finalView==='model'?(cmpKeys.length?{min:cmpKeys[0],max:cmpKeys.at(-1)}:potentialSurveyCmpRange()):null);
   if(!range){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(finalView==='model'?'Build CMP gathers to establish the model-comparison midpoint range.':'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);return;}
   const activeStacks=finalView==='migrated'?migratedStacks:finalStacks;
@@ -3913,16 +4416,182 @@ function setStage(stage){
 }
 document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>setStage(b.dataset.stage));
 function setAcquisitionSubtab(which){
-  const views={shot:'commonShotView',receiver:'commonReceiverView',spectrum:'spectrumView'};
-  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',spectrum:'tabSpectrum'};
+  const views={shot:'commonShotView',receiver:'commonReceiverView',offset:'offsetView',decon:'deconView',spectrum:'spectrumView'};
+  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',offset:'tabOffset',decon:'tabDecon',spectrum:'tabSpectrum'};
   Object.entries(views).forEach(([key,id])=>{document.getElementById(id).style.display=key===which?'':'none';});
   Object.entries(tabs).forEach(([key,id])=>{document.getElementById(id).classList.toggle('on',key===which);});
   if(which==='receiver')drawAcquisitionViews();
+  if(which==='offset'){refreshOffsetBins();drawOffsetGather();}
+  if(which==='decon')drawDeconPanel();
   if(which==='spectrum')drawSpectrum();
 }
 document.getElementById('tabCommonShot').onclick=()=>setAcquisitionSubtab('shot');
 document.getElementById('tabCommonReceiver').onclick=()=>setAcquisitionSubtab('receiver');
+document.getElementById('tabOffset').onclick=()=>setAcquisitionSubtab('offset');
+document.getElementById('tabDecon').onclick=()=>setAcquisitionSubtab('decon');
 document.getElementById('tabSpectrum').onclick=()=>setAcquisitionSubtab('spectrum');
+
+function deconViewVisible(){return document.getElementById('deconView').style.display!=='none';}
+function readDeconControls(){
+  deconMode=document.getElementById('deconMode').value==='spiking'?'spiking':'predictive';
+  deconLagMs=Math.max(0,+document.getElementById('deconLag').value||0);
+  deconOperatorMs=Math.max(4,+document.getElementById('deconOperator').value||40);
+  deconPrewhiten=Math.max(0,Math.min(50,+document.getElementById('deconPrewhiten').value||0));
+}
+
+/* Shows the autocorrelation of the recorded data against the autocorrelation of
+   the deconvolved data. The repeat peak collapsing is the whole result: it is a
+   direct measure of how much of the periodicity was removed, rather than an
+   impression from looking at a gather. */
+function drawDeconPanel(){
+  const cv=document.getElementById('deconCanvas');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('deconInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='11px ui-sans-serif,system-ui,sans-serif';
+  const L=58,R=18,T=22,B=36,pw=W-L-R,ph=H-T-B;
+  const shot=shotRecords.find(record=>record.id===selectedShotId)||shotRecords[0];
+  if(!shot){
+    ctx.fillStyle='#8a949f';ctx.fillText('Acquire shots to see an autocorrelation.',L,T+20);
+    info.textContent='Acquire shots, then look for a repeat peak in the autocorrelation.';
+    return;
+  }
+  readDeconControls();
+  const maxLagSeconds=Math.min(shot.nt*shot.dt*.6,.6),maxLag=Math.round(maxLagSeconds/shot.dt);
+  const stride=Math.max(1,Math.floor(shot.traces.length/12));
+  const noiseAmplitude=noiseLevel*(shot.signalRms||0);
+  const stack=(transform)=>{
+    let sum=null,used=0;
+    for(let k=0;k<shot.traces.length;k+=stride){
+      let trace=shot.traces[k];
+      if(noiseAmplitude>0&&shot.noise&&shot.noise[k]){
+        const mixed=new Float32Array(shot.nt);
+        for(let i=0;i<shot.nt;i++)mixed[i]=trace[i]+shot.noise[k][i]*noiseAmplitude;
+        trace=mixed;
+      }
+      const ac=autocorrelation(transform?transform(trace):trace,maxLag);
+      if(!sum)sum=new Float64Array(maxLag+1);
+      for(let i=0;i<=maxLag;i++)sum[i]+=ac[i];
+      used++;
+    }
+    // Capture the zero-lag value first: dividing in place would set sum[0] to 1
+    // on the first iteration and leave every other lag unscaled.
+    if(sum&&sum[0]>0){const norm=sum[0];for(let i=0;i<=maxLag;i++)sum[i]/=norm;}
+    return sum;
+  };
+  const before=stack(null);
+  const design=designDeconForShot(shot);
+  const after=deconEnabled&&design?stack(trace=>applyPredictionErrorFilter(trace,design.operator,design.lag)):null;
+
+  const xOf=lag=>L+lag/maxLag*pw,yOf=value=>T+ph/2-Math.max(-1.1,Math.min(1.1,value))*(ph/2-6);
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
+  for(let v=-1;v<=1;v+=.5){const y=yOf(v);ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();ctx.fillText(v.toFixed(1),20,y+3);}
+  for(let t=0;t<=maxLagSeconds+1e-6;t+=.05){
+    const x=xOf(t/shot.dt);
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    ctx.textAlign='center';ctx.fillText((t*1000).toFixed(0),x,T+ph+15);ctx.textAlign='left';
+  }
+  ctx.fillStyle='#8a949f';ctx.textAlign='center';ctx.fillText('autocorrelation lag (ms)',L+pw/2,H-6);ctx.textAlign='left';
+
+  const suggested=suggestPredictionLagSeconds(before,shot.dt,Math.max(2.5/f0,.02));
+  if(suggested){
+    const x=xOf(suggested/shot.dt);
+    ctx.strokeStyle='rgba(125,255,155,.55)';ctx.setLineDash([3,3]);ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#7dff9b';ctx.fillText(`repeat ${(suggested*1000).toFixed(0)} ms`,x+4,T+12);
+  }
+  if(deconEnabled&&design){
+    const x=xOf(design.lag);
+    ctx.strokeStyle='rgba(255,200,87,.85)';ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    ctx.fillStyle='#ffc857';ctx.fillText(`lag ${(design.lag*shot.dt*1000).toFixed(0)} ms`,x+4,T+26);
+  }
+  const curve=(data,color,width)=>{
+    if(!data)return;
+    ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();
+    for(let k=0;k<=maxLag;k++){const x=xOf(k),y=yOf(data[k]);k?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+    ctx.stroke();
+  };
+  curve(before,'#7fd3ff',1.4);
+  curve(after,'#7dff9b',1.6);
+  ctx.fillStyle='#7fd3ff';ctx.fillText('recorded',L+6,T+12);
+  if(after){ctx.fillStyle='#7dff9b';ctx.fillText('after decon',L+70,T+12);}
+
+  const peakLag=deconEnabled&&design?design.lag:(suggested?Math.round(suggested/shot.dt):null);
+  if(peakLag===null||peakLag>maxLag){
+    info.textContent=`Shot S${shot.id} · no clear repeat peak in the autocorrelation — nothing obvious to predict.`;
+    return;
+  }
+  const peakBefore=Math.abs(before[peakLag]),peakAfter=after?Math.abs(after[peakLag]):null;
+  const waterNote=isOffshore()&&topBoundary==='free'
+    ? ` Water two-way time here is about ${((waterDepthStats().mean-datumDepth())*2/WATER_VP*1000).toFixed(0)} ms.`:'';
+  info.innerHTML=`Shot S${shot.id} · repeat peak at ${(peakLag*shot.dt*1000).toFixed(0)} ms · normalised height `+
+    `<b>${peakBefore.toFixed(3)}</b>`+
+    (peakAfter!==null?` → <b>${peakAfter.toFixed(3)}</b> after decon (${peakBefore>1e-6?((1-peakAfter/peakBefore)*100).toFixed(0):'0'}% of the periodicity removed)`:' · deconvolution is off')+
+    `.${waterNote}`;
+}
+
+function applyDeconSettings(){
+  readDeconControls();
+  if(!shotRecords.length){document.getElementById('deconInfo').textContent='Acquire shots first.';return;}
+  rebuildFilteredDatabase(deconEnabled?`Deconvolution applied · ${deconMode} · lag ${deconLagMs.toFixed(0)} ms`:'Deconvolution removed');
+  drawDeconPanel();
+}
+document.getElementById('deconOn').onchange=e=>{deconEnabled=e.target.checked;applyDeconSettings();};
+document.getElementById('deconApply').onclick=applyDeconSettings;
+document.getElementById('deconMode').onchange=()=>{readDeconControls();if(deconEnabled)applyDeconSettings();else drawDeconPanel();};
+document.getElementById('deconAuto').onclick=()=>{
+  const shot=shotRecords.find(record=>record.id===selectedShotId)||shotRecords[0];
+  if(!shot){document.getElementById('deconInfo').textContent='Acquire shots first.';return;}
+  const maxLag=Math.round(Math.min(shot.nt*shot.dt*.6,.6)/shot.dt);
+  const stride=Math.max(1,Math.floor(shot.traces.length/12));
+  let sum=null;
+  for(let k=0;k<shot.traces.length;k+=stride){
+    const ac=autocorrelation(shot.traces[k],maxLag);
+    if(!sum)sum=new Float64Array(maxLag+1);
+    for(let i=0;i<=maxLag;i++)sum[i]+=ac[i];
+  }
+  const suggested=sum?suggestPredictionLagSeconds(sum,shot.dt,Math.max(2.5/f0,.02)):null;
+  if(!suggested){document.getElementById('deconInfo').textContent='No clear repeat peak found — set the lag by hand.';return;}
+  document.getElementById('deconLag').value=Math.round(suggested*1000);
+  readDeconControls();
+  if(deconEnabled)applyDeconSettings();else drawDeconPanel();
+};
+
+let offsetBinWidth=40,selectedOffsetBin=null;
+function offsetViewVisible(){return document.getElementById('offsetView').style.display!=='none';}
+function refreshOffsetBins(){
+  offsetBinWidth=Math.max(5,+document.getElementById('offsetBinWidth').value||40);
+  document.getElementById('offsetBinWidth').value=offsetBinWidth;
+  const bins=offsetBinsAvailable(offsetBinWidth),select=document.getElementById('offsetBin'),previous=selectedOffsetBin;
+  select.innerHTML='';
+  const keys=[...bins.keys()].sort((a,b)=>a-b);
+  keys.forEach(key=>{
+    const option=document.createElement('option');
+    option.value=key;
+    option.textContent=`${(key*offsetBinWidth).toFixed(0)} m · ${bins.get(key).length} traces`;
+    select.appendChild(option);
+  });
+  // Keep the chosen bin if it survived re-binning, else take the fullest one.
+  if(keys.includes(previous))selectedOffsetBin=previous;
+  else selectedOffsetBin=keys.length?keys.reduce((best,key)=>bins.get(key).length>bins.get(best).length?key:best,keys[0]):null;
+  if(selectedOffsetBin!==null)select.value=selectedOffsetBin;
+  return bins;
+}
+function drawOffsetGather(){
+  const bins=offsetBinsAvailable(offsetBinWidth);
+  const records=selectedOffsetBin===null?[]:(bins.get(selectedOffsetBin)||[]);
+  drawTraceGather(document.getElementById('offsetGather'),records,
+    {axis:'midpoint',empty:'Acquire shots, then pick an offset bin',suppressCmpHighlight:true,
+     variableDensity:true,densityColor:true,clipTraces:true,positiveFill:false,displayGain:2,lineWidth:1.15});
+  const info=document.getElementById('offsetInfo');
+  if(!records.length){info.textContent='Acquire shots to build common-offset gathers.';return;}
+  const midpoints=records.map(r=>r.midpointX),offsets=records.map(r=>r.sourceReceiverOffset);
+  info.textContent=`Offset ${(selectedOffsetBin*offsetBinWidth).toFixed(0)} m ±${(offsetBinWidth/2).toFixed(0)} m · ${records.length} traces · `+
+    `actual offsets ${Math.min(...offsets).toFixed(0)} to ${Math.max(...offsets).toFixed(0)} m · midpoints ${Math.min(...midpoints).toFixed(0)}–${Math.max(...midpoints).toFixed(0)} m`;
+}
+document.getElementById('offsetBin').onchange=e=>{selectedOffsetBin=+e.target.value;drawOffsetGather();};
+document.getElementById('offsetRebin').onclick=()=>{refreshOffsetBins();drawOffsetGather();};
 
 function readFilterCorners(){
   return [1,2,3,4].map(n=>+document.getElementById('fc'+n).value);
@@ -4024,6 +4693,7 @@ document.getElementById('vnmo').oninput=e=>{vnmo=+e.target.value;document.getEle
 document.getElementById('nmoGain').oninput=e=>{nmoDisplayGain=+e.target.value;document.getElementById('nmoGainLbl').textContent=nmoDisplayGain.toFixed(1)+'×';drawNmo();};
 document.getElementById('nmoDensity').onchange=e=>{nmoDensity=e.target.checked;drawNmo();};
 document.getElementById('exactMoveout').onchange=e=>{showExactMoveout=e.target.checked;drawNmo();};
+document.getElementById('showMultiples').onchange=e=>{showMultiples=e.target.checked;drawNmo();};
 document.querySelectorAll('input[name="velocitySource"]').forEach(r=>r.onchange=e=>{velocitySource=e.target.value;drawNmo();updateFlow();});
 document.getElementById('stretchMute').onchange=e=>{stretchLimit=e.target.value==='off'?null:+e.target.value;drawNmo();};
 function topMuteChanged(){sembDirty=true;finalStacks.clear();finalRange=null;drawNmo();drawCmpViews();drawFinalSection();}
@@ -4272,6 +4942,65 @@ function runNumericalChecks(){
     pass:SOLVER_WORKER_SOURCE.includes(fdKernel.toString())&&SOLVER_WORKER_SOURCE.includes(fdTopBoundary.toString())});
   results.push({test:'FD kernel closes over no outer bindings',
     pass:!/\b(fdCenter|fdPrevious|fdXp|fdXm|fdZp|fdZm|activeReceivers|topBoundary|simIdx|ricker)\b/.test(fdKernel.toString()+fdTopBoundary.toString())});
+
+  // --- Toeplitz solve and deconvolution ----------------------------------
+  // Levinson must solve a system whose answer is known by construction.
+  const toeplitzR=[4,1,.5,.25,.1],knownX=[1,-2,.5,3,-1.5];
+  const toeplitzB=knownX.map((_,row)=>knownX.reduce((sum,value,col)=>sum+toeplitzR[Math.abs(row-col)]*value,0));
+  const solved=levinsonSolve(Float64Array.from(toeplitzR),Float64Array.from(toeplitzB));
+  const solveError=Math.max(...knownX.map((value,k)=>Math.abs(value-solved[k])));
+  results.push({test:'Levinson solves a symmetric Toeplitz system',pass:solveError<1e-9});
+
+  // A synthetic reverberation: one wavelet plus decaying repeats at a fixed
+  // period. Predictive decon at that period must collapse the repeat peak.
+  const revDt=.002,revN=2048,revPeriod=.18,revLag=Math.round(revPeriod/revDt);
+  const reverb=new Float32Array(revN);
+  for(let order=0;order<5;order++){
+    const centre=Math.round((.20+order*revPeriod)/revDt),weight=Math.pow(-.65,order);
+    for(let i=Math.max(0,centre-40);i<Math.min(revN,centre+40);i++){
+      const q=(i-centre)/5;reverb[i]+=weight*(1-2*q*q)*Math.exp(-q*q);
+    }
+  }
+  const revMaxLag=revLag+60;
+  const revBefore=autocorrelation(reverb,revMaxLag);
+  const revNormBefore=Math.abs(revBefore[revLag]/revBefore[0]);
+  const revDesign=Float64Array.from(revBefore);revDesign[0]*=1.001;
+  const revR=revDesign.slice(0,50),revG=new Float64Array(50);
+  for(let i=0;i<50;i++)revG[i]=revDesign[revLag+i];
+  const revOperator=levinsonSolve(revR,revG);
+  const revAfterTrace=applyPredictionErrorFilter(reverb,revOperator,revLag);
+  const revAfter=autocorrelation(revAfterTrace,revMaxLag);
+  const revNormAfter=Math.abs(revAfter[revLag]/revAfter[0]);
+  results.push({test:'autocorrelation finds the reverberation period',
+    pass:Math.abs((suggestPredictionLagSeconds(revBefore,revDt,.02)||0)-revPeriod)<=2*revDt});
+  results.push({test:'predictive decon collapses the repeat peak',
+    pass:revNormBefore>.3&&revNormAfter<revNormBefore*.25});
+  // The primary must survive: energy before the first repeat is largely intact.
+  const primaryWindow=Math.round(.30/revDt);
+  const energyOf=(trace,to)=>{let e=0;for(let i=0;i<to;i++)e+=trace[i]*trace[i];return e;};
+  results.push({test:'deconvolution preserves the primary it cannot predict',
+    pass:energyOf(revAfterTrace,primaryWindow)>.5*energyOf(reverb,primaryWindow)});
+
+  // --- acoustic reflection coefficient ------------------------------------
+  const normal=acousticReflectionCoefficient(0,1500,1030,3000,2400).R;
+  const expectedNormal=(3000*2400-1500*1030)/(3000*2400+1500*1030);
+  results.push({test:'acoustic R at normal incidence matches the impedance form',
+    pass:Math.abs(normal-expectedNormal)<1e-12});
+  const critical=criticalAngleFor(1500,3000);
+  results.push({test:'total reflection past the critical angle',
+    pass:Math.abs(critical-Math.asin(.5))<1e-12
+      &&acousticReflectionCoefficient(critical+.05,1500,1030,3000,2400).critical===true
+      &&Math.abs(acousticReflectionCoefficient(critical+.05,1500,1030,3000,2400).R-1)<1e-12});
+  results.push({test:'no critical angle when the lower medium is slower',
+    pass:criticalAngleFor(3000,1500)===null});
+  // Angle must grow with offset and stay inside the first quadrant.
+  const angleNear=incidenceAngleFor(100,.5,2000),angleFar=incidenceAngleFor(1200,.5,2000);
+  results.push({test:'incidence angle grows with offset',
+    pass:angleFar>angleNear&&angleNear>0&&angleFar<Math.PI/2});
+  // The AVO axis must contain the data it is asked to show, at a round step.
+  results.push({test:'axis ceiling rounds up and never clips the data',
+    pass:niceCeiling(1.2)===2&&niceCeiling(3.4)===5&&niceCeiling(0.42)===0.5
+      &&[0.07,1,2.5,6,11,340].every(v=>niceCeiling(v)>=v)});
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

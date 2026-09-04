@@ -57,7 +57,7 @@
   main{min-width:0}.stage canvas{max-width:100%;height:auto}
   .stage-grid{display:grid;grid-template-columns:minmax(620px,1.15fr) minmax(660px,1fr);gap:12px;align-items:start}
   .model-panel,.active-gather-panel{min-width:0}
-  .model-panel #model{width:100%;height:auto}
+  .model-panel #model,.model-panel #acqSchematic{width:100%;height:auto}
   .model-edit-wrap{position:relative;width:100%}
   .model-context{display:none;position:absolute;z-index:8;min-width:145px;padding:5px;background:#0e1116;border:1px solid #44505f;border-radius:6px;box-shadow:0 8px 24px #0009}
   .model-context.on{display:block}.model-context button{width:100%;text-align:left;background:#161b22}
@@ -252,14 +252,12 @@
     </div>
 
     <section id="stageAcquisition" class="stage on">
-      <div class="panel" style="margin-bottom:12px">
-        <p class="ttl">Survey schematic — what is being recorded right now</p>
-        <canvas id="acqSchematic" class="wide" width="1040" height="158" aria-label="Live survey schematic showing the shot line and the spread the active shot records into"></canvas>
-        <div class="hint" id="acqSchematicInfo">Add shots and receivers, then run acquisition.</div>
-      </div>
       <div class="stage-grid">
         <div class="panel model-panel">
-          <p class="ttl">Velocity model, wavefield &amp; surface geometry</p>
+          <p class="ttl">Survey schematic — what is being recorded now</p>
+          <canvas id="acqSchematic" width="900" height="136" aria-label="Live survey schematic showing the shot line and the spread the active shot records into"></canvas>
+          <div class="hint" id="acqSchematicInfo">Add shots and receivers, then run acquisition.</div>
+          <p class="ttl" style="margin-top:11px">Velocity model, wavefield &amp; surface geometry</p>
           <div class="model-edit-wrap" id="modelEditWrap"><canvas id="model" width="900" height="460" aria-label="Editable velocity model and active wavefield"></canvas><div id="modelContext" class="model-context" role="menu"><button id="addKneeMenu" role="menuitem">Add knee here</button></div></div>
           <div class="hint" id="activeShotInfo">Add two or more shots on the surface, then run acquisition.</div>
         </div>
@@ -1204,8 +1202,8 @@ function drawGather(){
   gc.fillStyle='#0b0e12'; gc.fillRect(0,0,W,H);
   const L=42, R=10, T=22, B=14;
   const pw=W-L-R, ph=H-T-B;
-  const n=activeReceivers.length;
-  if(!traces||!n) return;
+  const n=Math.min(activeReceivers.length,traces?traces.length:0);
+  if(!n) return;
   const dxTr=pw/n;
   const displayAmax=robustTraceArrayAmplitude(traces.slice(0,n));
   const amp=dxTr*1.6/Math.max(displayAmax,1e-9);
@@ -1261,8 +1259,8 @@ function drawGray(){
   grc.fillStyle='#0b0e12'; grc.fillRect(0,0,W,H);
   const L=42,R=10,T=22,B=14;
   const pw=W-L-R, ph=H-T-B;
-  const n=activeReceivers.length;
-  if(!traces||!n||pw<1||ph<1) return;
+  const n=Math.min(activeReceivers.length,traces?traces.length:0);
+  if(!n||pw<1||ph<1) return;
   if(!grImg||grImg.width!==pw||grImg.height!==ph) grImg=grc.createImageData(pw,ph);
   const d=grImg.data;
   const shown = running? Math.min(it,nt) : nt;
@@ -1693,96 +1691,122 @@ function schematicFocusShot(){
   return shotPositions.find(shot=>shot.id===selectedShotId)||shotPositions[0]||null;
 }
 
+/* The NOMINAL spread, including channels that fall off the end of the model.
+   streamerReceiversFor drops those, because they genuinely record nothing --
+   but hiding them from the schematic loses the reason fold ramps at the ends of
+   a line. They are drawn hollow instead, so a shot near the edge visibly tows
+   most of its streamer off the model. */
+function nominalSpreadFor(shot){
+  if(acquisitionMode()!=='streamer')return recs.map(r=>({id:r.id,x:r.i*DX,live:true}));
+  const out=[],perSide=streamerChannelsPerSide(),nearLimit=3*DX,farLimit=(MX-4)*DX;
+  let id=0;
+  streamerSideDirections().forEach(dir=>{
+    for(let k=0;k<perSide;k++){
+      const x=shot.i*DX+dir*(streamerNearOffset+k*streamerSpacing);
+      id++;
+      out.push({id,x,live:x>=nearLimit&&x<=farLimit});
+    }
+  });
+  return out.sort((a,b)=>a.x-b.x);
+}
+
 function drawAcquisitionSchematic(){
   const cv=document.getElementById('acqSchematic');
   if(!cv)return;
   const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('acqSchematicInfo');
   ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
-  ctx.font='11px ui-sans-serif,system-ui,sans-serif';
-  const plotL=104,plotR=W-16,pw=plotR-plotL,modelWidth=MX*DX;
-  const xMap=metres=>plotL+Math.max(0,Math.min(1,metres/modelWidth))*pw;
-  const sourceY=52,receiverY=104,axisY=132;
+  ctx.font='9px ui-sans-serif,system-ui,sans-serif';
+  const plotL=74,plotR=W-10,pw=plotR-plotL,modelWidth=MX*DX;
+  const seaTop=8,seaBase=28,sourceY=50,receiverY=88,axisY=110;
 
   if(!shotPositions.length){
     ctx.fillStyle='#8a949f';ctx.fillText('No shots placed — use the source presets, or the Add Shot tool.',plotL,sourceY);
     info.textContent='Add shots and receivers, then run acquisition.';
     return;
   }
-  const focus=schematicFocusShot(),layout=focus?receiverLayoutForShot(focus):[];
+  const focus=schematicFocusShot(),spread=focus?nominalSpreadFor(focus):[];
 
-  // water column, so the marine case reads as marine at a glance
+  /* The view spans whatever the survey actually occupies, not just the model,
+     so a streamer towed off the left end stays inside the picture instead of
+     being clipped against the frame. */
+  let lo=0,hi=modelWidth;
+  shotPositions.forEach(shot=>{lo=Math.min(lo,shot.i*DX);hi=Math.max(hi,shot.i*DX);});
+  spread.forEach(receiver=>{lo=Math.min(lo,receiver.x);hi=Math.max(hi,receiver.x);});
+  const margin=Math.max(30,(hi-lo)*.03);lo-=margin;hi+=margin;
+  const xMap=metres=>plotL+(metres-lo)/Math.max(1e-9,hi-lo)*pw;
+
+  // anything beyond the model edges is outside the simulation
+  const insideL=xMap(0),insideR=xMap(modelWidth);
+  ctx.fillStyle='rgba(255,255,255,.028)';
+  if(insideL>plotL)ctx.fillRect(plotL,seaTop,insideL-plotL,axisY-seaTop);
+  if(insideR<plotR)ctx.fillRect(insideR,seaTop,plotR-insideR,axisY-seaTop);
+  ctx.strokeStyle='rgba(138,148,159,.35)';ctx.setLineDash([2,3]);ctx.lineWidth=1;
+  [insideL,insideR].forEach(x=>{if(x>plotL+1&&x<plotR-1){ctx.beginPath();ctx.moveTo(x,seaTop);ctx.lineTo(x,axisY);ctx.stroke();}});
+  ctx.setLineDash([]);
+
   if(isOffshore()){
-    ctx.fillStyle='rgba(23,71,94,.55)';ctx.beginPath();ctx.moveTo(plotL,18);ctx.lineTo(plotR,18);
-    for(let k=40;k>=0;k--){
-      const x=k/40,depth=seabedFractionAt(x)*MZ*DX;
-      ctx.lineTo(plotL+x*pw,18+Math.min(58,depth/400*58));
-    }
+    const seaY=x=>seaTop+Math.min(seaBase-seaTop,seabedFractionAt(Math.max(0,Math.min(1,x/modelWidth)))*MZ*DX/420*(seaBase-seaTop));
+    ctx.fillStyle='rgba(23,71,94,.55)';ctx.beginPath();ctx.moveTo(plotL,seaTop);ctx.lineTo(plotR,seaTop);
+    for(let k=30;k>=0;k--){const metres=lo+(hi-lo)*k/30;ctx.lineTo(xMap(metres),seaY(metres));}
     ctx.closePath();ctx.fill();
-    ctx.strokeStyle='rgba(140,215,255,.7)';ctx.lineWidth=1.2;ctx.beginPath();
-    for(let k=0;k<=40;k++){
-      const x=k/40,depth=seabedFractionAt(x)*MZ*DX,y=18+Math.min(58,depth/400*58);
-      k?ctx.lineTo(plotL+x*pw,y):ctx.moveTo(plotL+x*pw,y);
-    }
-    ctx.stroke();
-    ctx.fillStyle='rgba(150,205,235,.85)';ctx.fillText('sea',plotL+4,30);
-  }
-
-  // the offset fan: which receivers this shot is recording into
-  if(focus&&layout.length){
-    const stride=Math.max(1,Math.round(layout.length/14));
-    ctx.strokeStyle='rgba(255,200,87,.30)';ctx.lineWidth=1;
-    ctx.beginPath();
-    for(let k=0;k<layout.length;k+=stride){
-      ctx.moveTo(xMap(focus.i*DX),sourceY+7);ctx.lineTo(xMap(layout[k].i*DX),receiverY-7);
-    }
+    ctx.strokeStyle='rgba(140,215,255,.7)';ctx.lineWidth=1.1;ctx.beginPath();
+    for(let k=0;k<=30;k++){const metres=lo+(hi-lo)*k/30,x=xMap(metres);k?ctx.lineTo(x,seaY(metres)):ctx.moveTo(x,seaY(metres));}
     ctx.stroke();
   }
 
-  // lines
+  // the offset fan, live channels only -- dead ones record nothing to fan to
+  if(focus&&spread.length){
+    const live=spread.filter(receiver=>receiver.live),stride=Math.max(1,Math.round(live.length/12));
+    ctx.strokeStyle='rgba(255,200,87,.28)';ctx.lineWidth=1;ctx.beginPath();
+    for(let k=0;k<live.length;k+=stride){ctx.moveTo(xMap(focus.i*DX),sourceY+6);ctx.lineTo(xMap(live[k].x),receiverY-6);}
+    ctx.stroke();
+  }
+
   ctx.strokeStyle='#2a333c';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(plotL,sourceY);ctx.lineTo(plotR,sourceY);
   ctx.moveTo(plotL,receiverY);ctx.lineTo(plotR,receiverY);ctx.stroke();
 
-  // sources: acquired, pending, and the one firing now
   shotPositions.forEach(shot=>{
     const x=xMap(shot.i*DX),done=shotRecords.some(record=>record.id===shot.id);
     const active=(running||paused)&&shot.id===activeShotId;
-    ctx.fillStyle=active?'#ffc857':done?'#ff6b6b':'rgba(255,107,107,.32)';
+    ctx.fillStyle=active?'#ffc857':done?'#ff6b6b':'rgba(255,107,107,.30)';
     ctx.beginPath();
-    for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?2.6:6;k?ctx.lineTo(x+Math.cos(a)*rr,sourceY+Math.sin(a)*rr):ctx.moveTo(x+Math.cos(a)*rr,sourceY+Math.sin(a)*rr);}
+    for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?2.2:5;k?ctx.lineTo(x+Math.cos(a)*rr,sourceY+Math.sin(a)*rr):ctx.moveTo(x+Math.cos(a)*rr,sourceY+Math.sin(a)*rr);}
     ctx.closePath();ctx.fill();
-    if(active){ctx.strokeStyle='#ffe4a2';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,sourceY,11,0,Math.PI*2);ctx.stroke();}
+    if(active){ctx.strokeStyle='#ffe4a2';ctx.lineWidth=1.4;ctx.beginPath();ctx.arc(x,sourceY,9,0,Math.PI*2);ctx.stroke();}
   });
 
-  // the spread this shot records into
-  layout.forEach(receiver=>{
-    const x=xMap(receiver.i*DX);
-    ctx.fillStyle='#7fd3ff';
-    ctx.beginPath();ctx.moveTo(x,receiverY+5);ctx.lineTo(x-4,receiverY-3);ctx.lineTo(x+4,receiverY-3);ctx.closePath();ctx.fill();
+  spread.forEach(receiver=>{
+    const x=xMap(receiver.x);
+    ctx.beginPath();ctx.moveTo(x,receiverY+4);ctx.lineTo(x-3.2,receiverY-2.6);ctx.lineTo(x+3.2,receiverY-2.6);ctx.closePath();
+    if(receiver.live){ctx.fillStyle='#7fd3ff';ctx.fill();}
+    else{ctx.strokeStyle='rgba(127,211,255,.42)';ctx.lineWidth=1;ctx.stroke();}
   });
 
-  // distance axis
-  ctx.strokeStyle='#3a444f';ctx.beginPath();ctx.moveTo(plotL,axisY);ctx.lineTo(plotR,axisY);ctx.stroke();
+  ctx.strokeStyle='#3a444f';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(plotL,axisY);ctx.lineTo(plotR,axisY);ctx.stroke();
   ctx.fillStyle='#65717e';ctx.textAlign='center';
-  for(let metres=0;metres<=modelWidth;metres+=200){
+  const span=hi-lo,tick=span>2600?500:span>1200?200:100;
+  for(let metres=Math.ceil(lo/tick)*tick;metres<=hi;metres+=tick){
     const x=xMap(metres);
-    ctx.beginPath();ctx.moveTo(x,axisY-4);ctx.lineTo(x,axisY+4);ctx.stroke();
-    ctx.fillText(String(metres),x,axisY+16);
+    ctx.beginPath();ctx.moveTo(x,axisY-3);ctx.lineTo(x,axisY+3);ctx.stroke();
+    ctx.fillText(String(metres),x,axisY+14);
   }
   ctx.textAlign='left';
 
-  ctx.fillStyle='#8a949f';ctx.font='10px ui-sans-serif,system-ui,sans-serif';
-  ctx.fillText('SHOT LINE',8,sourceY+3);
-  ctx.fillText(acquisitionMode()==='streamer'?'STREAMER':isOffshore()?'SEABED NODES':'PLANTED SPREAD',8,receiverY+3);
-  ctx.fillText('surface x (m)',8,axisY+16);
+  ctx.fillStyle='#8a949f';
+  ctx.fillText('SHOTS',6,sourceY+3);
+  ctx.fillText(acquisitionMode()==='streamer'?'STREAMER':isOffshore()?'SEABED NODES':'SPREAD',6,receiverY+3);
+  ctx.fillText('x (m)',6,axisY+14);
 
   const acquired=shotRecords.length,total=shotPositions.length;
-  if(!focus||!layout.length){info.textContent=`${acquired} of ${total} shots acquired · no receivers for this shot.`;return;}
-  const offsets=layout.map(receiver=>(receiver.i-focus.i)*DX);
+  const live=spread.filter(receiver=>receiver.live),dead=spread.length-live.length;
+  if(!focus||!live.length){info.textContent=`${acquired} of ${total} shots acquired · no live channels for this shot.`;return;}
+  const offsets=live.map(receiver=>receiver.x-focus.i*DX);
   const near=Math.min(...offsets.map(Math.abs)),far=Math.max(...offsets.map(Math.abs));
   const position=(running||paused)?`Firing shot ${queueIndex+1} of ${acquisitionQueue.length}`:`Shot S${focus.id} selected`;
-  info.textContent=`${position} · source at ${(focus.i*DX).toFixed(0)} m · ${layout.length} live channels · offsets ${near.toFixed(0)}–${far.toFixed(0)} m · `+
-    `${acquired}/${total} shots acquired${isSettling()?' · wavefield draining':''}`;
+  info.textContent=`${position} · source at ${(focus.i*DX).toFixed(0)} m · ${live.length} live channels`+
+    (dead?` (${dead} towed off the model, hollow)`:'')+
+    ` · offsets ${near.toFixed(0)}–${far.toFixed(0)} m · ${acquired}/${total} shots acquired${isSettling()?' · wavefield draining':''}`;
 }
 
 function drawAcquisitionViews(){

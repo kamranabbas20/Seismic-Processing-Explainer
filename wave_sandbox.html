@@ -737,6 +737,7 @@ function setup(){
   syncActiveReceivers();
   traces = activeReceivers.map(()=> new Float32Array(nt));
   it=0; maxAmp=1e-9; sembDirty=true;
+  rebuildFdState();
 }
 
 /* Shots share the same model, damping and FD stencil. Rebuilding those large
@@ -748,6 +749,7 @@ function resetShotSimulation(){
   syncActiveReceivers();
   traces=activeReceivers.map(()=>new Float32Array(nt));
   it=0;maxAmp=1e-9;sembDirty=true;
+  rebuildFdState();
 }
 
 function initializeShotSimulation(shot){
@@ -860,51 +862,92 @@ function buildCmpBins(selectBest=true){
   drawCmpViews(); drawAcquisitionViews(); drawFinalSection();
 }
 
-/* Top boundary.
+/* ---------------- the finite-difference kernel ---------------- */
+/* This kernel exists EXACTLY ONCE. The main thread calls it directly and the
+   worker source is built from its own .toString(), so the two solver paths
+   cannot drift apart -- which they silently could while each carried its own
+   copy. The consequence is a hard rule: nothing in here may close over an
+   outer binding, because the worker has none of them. Everything arrives in
+   `state`, including the arrays it rotates.
+
+   Top boundary.
    FREE SURFACE pins p = 0, but ONLY across the model width. Extending p = 0
    over the halo would make the top a perfect mirror lying on the sponge,
    letting surface-guided energy skim sideways through the padding (parallel to
    the damping gradient, so barely attenuated) and return as a fake late event.
    Outside the model the top row is left free to be swallowed by the sponge.
    Because the reflection coefficient is -1, this surface is what creates the
-   source ghost and the free-surface multiples seen in the records.
+   source ghost and the free-surface multiples -- offshore it is the sea
+   surface, and both are compulsory rather than optional.
    ABSORBING replaces it with a first-order Mur radiating condition across the
    whole top row, which removes the ghost and the multiples and leaves only
    primaries -- the reference case for identifying what a multiple looks like. */
-function applyTopBoundary(next,current){
-  if(topBoundary==='free'){
-    for(let i=OX;i<OX+MX;i++) next[i]=0;
+function fdTopBoundary(next,current,state){
+  if(state.freeSurface){
+    for(let i=state.OX;i<state.OX+state.MX;i++)next[i]=0;
     return;
   }
-  for(let i=0;i<NX;i++){
-    const c=vp[i],k=(c*dt-DX)/(c*dt+DX);
-    next[i]=current[i+NX]+k*(next[i+NX]-current[i]);
+  const nx=state.NX,dt=state.dt,dx=state.DX,topVp=state.topVp;
+  for(let i=0;i<nx;i++){
+    const speed=topVp[i],k=(speed*dt-dx)/(speed*dt+dx);
+    next[i]=current[i+nx]+k*(next[i+nx]-current[i]);
   }
 }
 
-function step(){
-  const c=fdCenter,q=fdPrevious,xp=fdXp,xm=fdXm,zp=fdZp,zm=fdZm;
-  const previous=p0,current=p1,next=p2,nx=NX;
+function fdKernel(state){
+  const c=state.c,q=state.q,xp=state.xp,xm=state.xm,zp=state.zp,zm=state.zm;
+  const nx=state.NX,end=(state.NZ-1)*nx;
+  const previous=state.p0,current=state.p1,next=state.p2;
   // Boundary coefficients are zero, so a single contiguous loop is equivalent
-  // to the former nested row/column loop and is substantially easier for the
-  // JavaScript engine to optimize.
-  const end=(NZ-1)*nx;
+  // to a nested row/column loop and is substantially easier for the JavaScript
+  // engine to optimize.
   for(let k=nx;k<end;k++){
     next[k]=c[k]*current[k]+q[k]*previous[k]+xp[k]*current[k+1]+xm[k]*current[k-1]+zp[k]*current[k+nx]+zm[k]*current[k-nx];
   }
-  applyTopBoundary(p2,p1);
-  // source
-  const t=it*dt;
-  p2[simIdx(src.i,src.j)] += ricker(t)*3e4;
-
-  // record
-  for(let n=0;n<activeReceivers.length;n++){
-    const r=activeReceivers[n], val=p2[simIdx(r.i,r.j)];
-    traces[n][it]=val;
-    const a=Math.abs(val); if(a>maxAmp) maxAmp=a;
+  fdTopBoundary(next,current,state);
+  // Causal Ricker, inlined so the kernel stays free of outer bindings.
+  const phase=Math.PI*state.f0*(state.it*state.dt-1.1/state.f0),phase2=phase*phase;
+  next[state.srcIdx]+=(1-2*phase2)*Math.exp(-phase2)*3e4;
+  const recIdx=state.recIdx,traces=state.traces;
+  let maxAmp=state.maxAmp;
+  for(let n=0;n<recIdx.length;n++){
+    const v=next[recIdx[n]];
+    traces[n][state.it]=v;
+    const m=v<0?-v:v;
+    if(m>maxAmp)maxAmp=m;
   }
-  const tmp=p0; p0=p1; p1=p2; p2=tmp;
-  it++;
+  state.maxAmp=maxAmp;
+  state.p0=current;state.p1=next;state.p2=previous;
+  state.it++;
+}
+
+/* Main-thread view of the kernel state. The pressure arrays and counters stay
+   as module globals because the rest of the page reads them, so they are
+   handed in and taken back around each call -- ten property accesses against
+   127,600 cell updates. */
+let fdState=null;
+function rebuildFdState(){
+  const recIdx=new Int32Array(activeReceivers.length);
+  activeReceivers.forEach((r,n)=>{recIdx[n]=simIdx(r.i,r.j);});
+  fdState={c:fdCenter,q:fdPrevious,xp:fdXp,xm:fdXm,zp:fdZp,zm:fdZm,
+    NX,NZ,OX,MX,DX,dt,f0,topVp:vp.subarray(0,NX),
+    freeSurface:topBoundary==='free',
+    srcIdx:simIdx(src.i,src.j),recIdx,traces,
+    p0,p1,p2,it,maxAmp};
+}
+
+// Kept for the rest of the page (and the self-tests), which work in arrays
+// rather than kernel state.
+function applyTopBoundary(next,current){
+  fdTopBoundary(next,current,{freeSurface:topBoundary==='free',OX,MX,NX,dt,DX,topVp:vp});
+}
+
+function step(){
+  if(!fdState)rebuildFdState();
+  const state=fdState;
+  state.p0=p0;state.p1=p1;state.p2=p2;state.it=it;state.maxAmp=maxAmp;
+  fdKernel(state);
+  p0=state.p0;p1=state.p1;p2=state.p2;it=state.it;maxAmp=state.maxAmp;
 }
 
 /* ---------------- drawing ---------------- */
@@ -2300,35 +2343,20 @@ document.getElementById('nmoRaw').addEventListener('click',e=>{
    Blob-URL workers are refused by some browsers when the file is opened
    straight from disk (origin "null"), so construction is feature-tested and
    the original main-thread pump stays as a fully working fallback. */
+/* The worker script is GENERATED from the kernel above via toString(), so the
+   worker provably runs the same code the fallback does. Only the scheduling
+   and message glue is worker-specific. */
 const SOLVER_WORKER_SOURCE=`
 "use strict";
-let g=null,job=null,it=0,paused=false,cancelled=false,credit=0,clock=0,timer=null;
-let p0=null,p1=null,p2=null,traces=null,maxAmp=1e-9,lastField=0,lastTraces=0;
+${fdTopBoundary.toString()}
+${fdKernel.toString()}
 
-function ricker(t,f0){const a=Math.PI*f0*(t-1.1/f0),a2=a*a;return (1-2*a2)*Math.exp(-a2);}
-
-function applyTop(next,current){
-  if(job.freeSurface){for(let i=g.OX;i<g.OX+g.MX;i++)next[i]=0;return;}
-  const NX=g.NX,dt=job.dt,DX=g.DX;
-  for(let i=0;i<NX;i++){const c=g.topVp[i],k=(c*dt-DX)/(c*dt+DX);next[i]=current[i+NX]+k*(next[i+NX]-current[i]);}
-}
-
-function step(){
-  const c=g.c,q=g.q,xp=g.xp,xm=g.xm,zp=g.zp,zm=g.zm,nx=g.NX;
-  const previous=p0,current=p1,next=p2,end=(g.NZ-1)*nx;
-  for(let k=nx;k<end;k++){
-    next[k]=c[k]*current[k]+q[k]*previous[k]+xp[k]*current[k+1]+xm[k]*current[k-1]+zp[k]*current[k+nx]+zm[k]*current[k-nx];
-  }
-  applyTop(next,current);
-  next[job.srcIdx]+=ricker(it*job.dt,job.f0)*3e4;
-  const recIdx=job.recIdx;
-  for(let n=0;n<recIdx.length;n++){const v=next[recIdx[n]];traces[n][it]=v;const a=v<0?-v:v;if(a>maxAmp)maxAmp=a;}
-  const tmp=p0;p0=p1;p1=next;p2=tmp;
-  it++;
-}
+let g=null,job=null,state=null,traces=null,paused=false,cancelled=false;
+let credit=0,clock=0,timer=null,lastField=0,lastTraces=0;
 
 function extractField(){
   const MX=g.MX,MZ=g.MZ,NX=g.NX,OX=g.OX,OZ=g.OZ,out=new Float32Array(MX*MZ);
+  const p1=state.p1;
   for(let j=0;j<MZ;j++){const s=(j+OZ)*NX+OX,d=j*MX;for(let i=0;i<MX;i++)out[d+i]=p1[s+i];}
   return out;
 }
@@ -2343,16 +2371,16 @@ function run(){
   if(job.speed>=16)credit=job.nt;
   else credit=Math.min(job.nt,credit+elapsed*(job.nt/4000*job.speed));
   const budget=job.speed<=1?5:job.speed<=2?8:job.speed<=4?24:job.speed<=8?48:80;
-  while(!cancelled&&credit>=1&&it<job.nt&&performance.now()-start<budget){step();credit--;}
+  while(!cancelled&&credit>=1&&state.it<job.nt&&performance.now()-start<budget){fdKernel(state);credit--;}
   const now=performance.now();
-  if(it>=job.nt){
+  if(state.it>=job.nt){
     const field=extractField(),done=traces;
-    postMessage({type:'done',it:it,traces:done,maxAmp:maxAmp,field:field},done.map(t=>t.buffer).concat([field.buffer]));
-    job=null;traces=null;return;
+    postMessage({type:'done',it:state.it,traces:done,maxAmp:state.maxAmp,field:field},done.map(t=>t.buffer).concat([field.buffer]));
+    job=null;state=null;traces=null;return;
   }
   if(now-lastField>=60){
     lastField=now;
-    const field=extractField(),payload={type:'progress',it:it,field:field},transfer=[field.buffer];
+    const field=extractField(),payload={type:'progress',it:state.it,field:field},transfer=[field.buffer];
     if(now-lastTraces>=260){lastTraces=now;payload.traces=traces.map(t=>t.slice());payload.traces.forEach(t=>transfer.push(t.buffer));}
     postMessage(payload,transfer);
   }
@@ -2363,16 +2391,19 @@ onmessage=function(e){
   const m=e.data;
   if(m.type==='model'){g=m;return;}
   if(m.type==='shot'){
-    job=m;it=0;maxAmp=1e-9;paused=false;cancelled=false;credit=0;clock=performance.now();lastField=0;lastTraces=0;
+    job=m;paused=false;cancelled=false;credit=0;clock=performance.now();lastField=0;lastTraces=0;
     const n=g.NX*g.NZ;
-    if(!p0||p0.length!==n){p0=new Float32Array(n);p1=new Float32Array(n);p2=new Float32Array(n);}
-    else{p0.fill(0);p1.fill(0);p2.fill(0);}
+    const p0=new Float32Array(n),p1=new Float32Array(n),p2=new Float32Array(n);
     traces=[];for(let k=0;k<m.recIdx.length;k++)traces.push(new Float32Array(m.nt));
+    state={c:g.c,q:g.q,xp:g.xp,xm:g.xm,zp:g.zp,zm:g.zm,
+      NX:g.NX,NZ:g.NZ,OX:g.OX,MX:g.MX,DX:g.DX,dt:m.dt,f0:m.f0,topVp:g.topVp,
+      freeSurface:m.freeSurface,srcIdx:m.srcIdx,recIdx:m.recIdx,traces,
+      p0,p1,p2,it:0,maxAmp:1e-9};
     schedule(0);return;
   }
   if(m.type==='pause'){paused=!!m.paused;clock=performance.now();return;}
   if(m.type==='speed'){if(job)job.speed=m.speed;return;}
-  if(m.type==='cancel'){cancelled=true;job=null;traces=null;if(timer!==null){clearTimeout(timer);timer=null;}return;}
+  if(m.type==='cancel'){cancelled=true;job=null;state=null;traces=null;if(timer!==null){clearTimeout(timer);timer=null;}return;}
 };
 postMessage({type:'ready'});
 `;
@@ -3760,6 +3791,16 @@ function runNumericalChecks(){
   environment=savedEnvironment;waterDepth=savedWaterDepth;
   results.push({test:'switching back onshore restores the dry column exactly',
     pass:JSON.stringify(modelVerticalSegmentsAt(MX*DX/2))===JSON.stringify(dryColumn)});
+
+  // --- one kernel, two execution paths -----------------------------------
+  // The worker script is generated from the kernel's own source, so this
+  // asserts there is genuinely one implementation rather than two that merely
+  // agree today. External checks confirm the two paths produce bit-identical
+  // traces; this is the structural half of that guarantee.
+  results.push({test:'worker script is generated from the one FD kernel source',
+    pass:SOLVER_WORKER_SOURCE.includes(fdKernel.toString())&&SOLVER_WORKER_SOURCE.includes(fdTopBoundary.toString())});
+  results.push({test:'FD kernel closes over no outer bindings',
+    pass:!/\b(fdCenter|fdPrevious|fdXp|fdXm|fdZp|fdZm|activeReceivers|topBoundary|simIdx|ricker)\b/.test(fdKernel.toString()+fdTopBoundary.toString())});
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

@@ -5,6 +5,7 @@
 <title>2D Wave Propagation &amp; CMP Processing Sandbox</title>
 <style>
   :root{
+    --panel-w:230px;
     --bg:#0e1116; --panel:#161b22; --line:#2a313b; --txt:#d5dae1; --dim:#8a949f;
     --acc:#4da3ff; --gold:#ffc857; --warn:#ffb35c; --good:#68d391; --bad:#ff6b6b;
   }
@@ -15,13 +16,18 @@
          align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
   h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
   .hint{color:var(--dim);font-size:12px}
-  #wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:12px;padding:12px;align-items:start}
+  #wrap{display:grid;grid-template-columns:var(--panel-w) 10px minmax(0,1fr);gap:6px;padding:12px;align-items:start}
+  #panelResize{position:sticky;top:58px;height:calc(100vh - 76px);min-height:180px;cursor:col-resize;
+    touch-action:none;display:flex;align-items:center;justify-content:center}
+  #panelResize::before{content:'';width:2px;height:100%;border-radius:2px;background:var(--line);transition:background .12s}
+  #panelResize:hover::before,#panelResize.dragging::before{background:var(--acc);width:3px}
+  #panelResize:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
   .ttl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);
        margin:0 0 8px}
   canvas{display:block;border-radius:4px;background:#000;cursor:crosshair;touch-action:manipulation}
   #model{touch-action:none}
-  #ctrl{width:230px;display:flex;flex-direction:column;gap:14px;position:sticky;top:58px}
+  #ctrl{width:var(--panel-w);display:flex;flex-direction:column;gap:14px;position:sticky;top:58px}
   .grp{display:flex;flex-direction:column;gap:6px}
   label{font-size:12px;color:var(--dim);display:flex;justify-content:space-between}
   input[type=range]{width:100%;accent-color:var(--acc)}
@@ -107,7 +113,7 @@
   .empty{padding:24px;text-align:center;color:var(--dim);border:1px dashed var(--line);border-radius:6px}
   @media(max-width:1450px){.stage-grid{grid-template-columns:1fr}}
   @media(max-width:1450px){.nmo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-  @media(max-width:1050px){#wrap{grid-template-columns:1fr}#ctrl{position:static;width:auto}.cmp-layout{grid-template-columns:1fr}.main-tabs{margin-left:0}}
+  @media(max-width:1050px){#wrap{grid-template-columns:1fr}#ctrl{position:static;width:auto}#panelResize{display:none}.cmp-layout{grid-template-columns:1fr}.main-tabs{margin-left:0}}
   @media(max-width:650px){.nmo-grid{grid-template-columns:1fr}.dual{flex-wrap:wrap}.panel{overflow-x:auto}}
 </style>
 </head>
@@ -147,28 +153,38 @@
       <div id="layerList"></div>
       <div class="row"><button id="addLayer">+ Layer</button><button id="delLayer">Remove selected layer</button></div>
       <div class="hint" id="layerActionHint">Select a layer row to edit or remove it.</div>
+      <p class="ttl" style="margin-top:8px">Selected boundary</p>
+      <label>Knee points <span id="kneeCountLbl" class="metric">5</span></label>
+      <input type="range" id="kneeCount" min="2" max="80" value="5" step="1">
+      <div class="hint" id="kneeCountInfo">Resampling keeps the horizon where it is — more knees just give finer control.</div>
+    </div>
+
+    <div class="grp">
+      <p class="ttl">Environment</p>
+      <label>Setting <select id="environment"><option value="onshore">Onshore (land)</option><option value="offshore">Offshore (marine)</option></select></label>
+      <div id="marineBox" style="display:none">
+        <table><tr><td>Water depth (m)</td><td><input type="number" id="waterDepthInput" value="150" min="25" step="25"></td></tr></table>
+        <button id="applyWater">Flatten seabed to this depth</button>
+        <div class="hint">The seabed is a horizon: drag its knees on the model, or right-click it to add more.</div>
+        <label style="margin-top:6px">Receivers <select id="marineReceivers">
+          <option value="towed">Towed streamer, near surface</option>
+          <option value="seabed">Ocean bottom nodes, on the seabed</option>
+        </select></label>
+        <div class="hint" id="marineReceiverInfo">Shot depth is unchanged either way — the source is towed near the surface in both.</div>
+      </div>
+      <div class="hint" id="environmentInfo">Onshore: sources and receivers are planted in rock at the acquisition datum.</div>
     </div>
 
     <div class="grp">
       <p class="ttl">Survey geometry</p>
-      <table>
-        <tr><td>Receivers</td><td><input type="number" id="pgN" value="40" min="1" max="120" step="1"></td></tr>
-        <tr><td>Spacing (m)</td><td><input type="number" id="pgDx" value="20" min="5" step="5"></td></tr>
-        <tr><td>First x (m)</td><td><input type="number" id="pgOff" value="260" min="0" step="5"></td></tr>
-      </table>
-      <div class="row"><button id="pgApply">Apply receivers</button><button id="surveyPreset">Teaching survey</button></div>
-      <div class="hint" style="margin-top:5px">Source presets — automatically wider than the receiver spread</div>
-      <div class="preset-grid" id="sourcePresets"><button data-source-count="3">3 shots</button><button data-source-count="5">5 shots</button><button data-source-count="10">10 shots</button><button data-source-count="20">20 shots</button><button data-source-count="25">25 shots</button></div>
-      <div class="hint" id="pgInfo">Default: 28 shots at 40 m spacing, 40 central receivers at 20 m.</div>
-      <p class="ttl" style="margin-top:8px">Environment</p>
-      <label>Setting <select id="environment"><option value="onshore">Onshore (land)</option><option value="offshore">Offshore (marine)</option></select></label>
-      <div id="marineBox" style="display:none">
-        <table><tr><td>Water depth (m)</td><td><input type="number" id="waterDepthInput" value="150" min="25" step="25"></td></tr></table>
-        <button id="applyWater">Apply water depth</button>
+      <div id="fixedSpreadBox">
+        <table>
+          <tr><td>Receivers</td><td><input type="number" id="pgN" value="40" min="1" max="120" step="1"></td></tr>
+          <tr><td>Spacing (m)</td><td><input type="number" id="pgDx" value="20" min="5" step="5"></td></tr>
+          <tr><td>First x (m)</td><td><input type="number" id="pgOff" value="260" min="0" step="5"></td></tr>
+        </table>
+        <div class="row"><button id="pgApply">Apply receivers</button><button id="surveyPreset">Teaching survey</button></div>
       </div>
-      <div class="hint" id="environmentInfo">Onshore: sources and receivers are planted in rock at the acquisition datum.</div>
-      <p class="ttl" style="margin-top:8px">Acquisition geometry</p>
-      <label>Mode <select id="acqMode"><option value="fixed">Fixed spread (land)</option><option value="streamer">Towed streamer (marine)</option></select></label>
       <div id="streamerBox" style="display:none">
         <table>
           <tr><td>Channels</td><td><input type="number" id="stCh" value="48" min="2" max="240" step="1"></td></tr>
@@ -178,6 +194,9 @@
         <label>Spread <select id="stSide"><option value="trailing">Trailing (behind)</option><option value="leading">Leading (ahead)</option><option value="split">Split (both sides)</option></select></label>
         <button id="stApply">Apply streamer</button>
       </div>
+      <div class="hint" style="margin-top:5px">Source presets — automatically wider than the receiver spread</div>
+      <div class="preset-grid" id="sourcePresets"><button data-source-count="3">3 shots</button><button data-source-count="5">5 shots</button><button data-source-count="10">10 shots</button><button data-source-count="20">20 shots</button><button data-source-count="25">25 shots</button></div>
+      <div class="hint" id="pgInfo">Default: 28 shots at 40 m spacing, 40 central receivers at 20 m.</div>
       <div class="hint" id="acqModeInfo">Fixed spread: every shot records into the same planted stations.</div>
     </div>
 
@@ -223,6 +242,9 @@
       <div class="progress" role="progressbar" aria-label="Acquisition progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="acqProgress"></div></div>
     </div>
   </div>
+
+  <div id="panelResize" role="separator" aria-orientation="vertical" tabindex="0"
+       aria-label="Resize parameter panel — drag, or use arrow keys; double-click to reset" title="Drag to resize · double-click to reset"></div>
 
   <main>
     <div class="flow panel" aria-label="Teaching workflow">
@@ -480,11 +502,27 @@ const PAL = ['#2f4858','#33697d','#3f9098','#7fb8a4','#c9d6a3','#e0b97d','#c98b6
    surface, and the water-column multiples all emerge from the wave equation
    once the water and the free surface are there. */
 let environment='onshore';
-let waterDepth=0;
+/* The seabed is a horizon like any other: a piecewise-linear curve of draggable
+   knees in the same fractional-depth space as the layer boundaries, so the same
+   editor drives it and a flat seabed is just a curve whose knees share a depth.
+   Water is applied per column, replacing whatever rock lies above the seabed,
+   so the geology keeps its shape and only the submerged part is overlain. */
+let seabedKnees=kneesFromDepths([.15,.15,.15,.15,.15]);
 const WATER_VP=1500, WATER_RHO=1030, WATER_COLOR='#17475e';
+const SEABED='seabed';
+function isOffshore(){return environment==='offshore';}
 function datumDepth(){return SURF*DX;}
-function isSubmerged(){return waterDepth>datumDepth();}
-function datumVelocity(){return isSubmerged()?WATER_VP:layers[0].vp;}
+function seabedFractionAt(x){return Math.max(0,Math.min(1,interpolateKnees(seabedKnees,Math.max(0,Math.min(1,x)))));}
+function seabedDepthAtColumn(mi){return isOffshore()?seabedFractionAt(mi/Math.max(1,MX-1))*MZ*DX:0;}
+function isSubmergedAt(mi){return seabedDepthAtColumn(mi)>datumDepth();}
+function datumVelocityAt(mi){return isSubmergedAt(mi)?WATER_VP:layers[0].vp;}
+function columnOf(midpointX){return Math.max(0,Math.min(MX-1,Math.round(midpointX/DX)));}
+function waterDepthStats(){
+  if(!isOffshore())return{min:0,max:0,mean:0};
+  let min=Infinity,max=-Infinity,sum=0;
+  for(let i=0;i<MX;i++){const d=seabedDepthAtColumn(i);min=Math.min(min,d);max=Math.max(max,d);sum+=d;}
+  return{min,max,mean:sum/MX};
+}
 function seabedReflectionCoefficient(){
   const zWater=WATER_VP*WATER_RHO,zRock=layers[0].vp*layers[0].rho;
   return (zRock-zWater)/(zRock+zWater);
@@ -543,10 +581,11 @@ function buildModel(){
   // not keep dipping there or it would strike the absorbing wall at an angle.
   for(let i=0;i<NX;i++){
     const mi = Math.max(0, Math.min(MX-1, i-OX));   // nearest model column
+    const seabed = seabedDepthAtColumn(mi);
     for(let j=0;j<NZ;j++){
       // The sea covers the halo too -- water does not stop at the edge of the
       // region the user drew, and a wall of rock there would reflect.
-      if(waterDepth>0&&(j-OZ)*DX<waterDepth){
+      if(seabed>0&&(j-OZ)*DX<seabed){
         vp[j*NX+i]=WATER_VP; rho[j*NX+i]=WATER_RHO;
         continue;
       }
@@ -584,7 +623,25 @@ let selectedShotId = 1;
               and the fold builds up as a ramp instead of a plateau.
    `recs` always holds the user-editable fixed spread; `activeReceivers` is the
    layout the solver actually records into for the shot being simulated. */
-let acquisitionMode='fixed';
+/* Acquisition mode is no longer a separate choice: it follows from the
+   environment and where the receivers are. Onshore means a planted spread;
+   offshore means a towed streamer if the receivers are near the surface, or a
+   fixed node array if they are on the seabed. */
+let marineReceivers='towed';                 // 'towed' | 'seabed'
+function acquisitionMode(){return isOffshore()&&marineReceivers==='towed'?'streamer':'fixed';}
+
+/* Receiver depth. A towed streamer hangs at the acquisition datum; ocean-bottom
+   nodes follow the seabed horizon, sitting one cell into the water above it so
+   they record water pressure rather than being buried in rock. The SOURCE depth
+   never changes -- the gun is towed near the surface in both marine cases, and
+   sits at the datum onshore. */
+function receiverDepthCell(i){
+  if(!isOffshore()||marineReceivers!=='seabed')return SURF;
+  const seabed=seabedDepthAtColumn(Math.max(0,Math.min(MX-1,i)));
+  return Math.max(SURF,Math.min(MZ-2,Math.round(seabed/DX)-1));
+}
+function syncReceiverDepths(){recs.forEach(r=>{r.j=receiverDepthCell(r.i);});}
+
 let streamerChannels=48,streamerSpacing=25,streamerNearOffset=100,streamerSide='trailing';
 let activeReceivers=recs;
 
@@ -603,18 +660,19 @@ function streamerReceiversFor(shot){
       const x=sx+dir*(streamerNearOffset+k*streamerSpacing);
       id++;
       if(x<nearLimit||x>farLimit)continue;
-      out.push({id,i:Math.round(x/DX),j:SURF});
+      out.push({id,i:Math.round(x/DX),j:receiverDepthCell(Math.round(x/DX))});
     }
   });
   return out.sort((a,b)=>a.i-b.i);
 }
 
 function receiverLayoutForShot(shot){
-  return acquisitionMode==='streamer'?streamerReceiversFor(shot):recs;
+  return acquisitionMode()==='streamer'?streamerReceiversFor(shot):recs;
 }
 
 function syncActiveReceivers(){
-  if(acquisitionMode!=='streamer'){activeReceivers=recs;return;}
+  syncReceiverDepths();
+  if(acquisitionMode()!=='streamer'){activeReceivers=recs;return;}
   const shot=shotPositions.find(s=>s.id===activeShotId)||shotPositions.find(s=>s.id===selectedShotId)||shotPositions[0];
   activeReceivers=shot?streamerReceiversFor(shot):[];
 }
@@ -623,7 +681,7 @@ function syncActiveReceivers(){
    is running, otherwise a preview of where the streamer sits for the selected
    shot so the towed geometry is visible before acquisition starts. */
 function displayReceivers(){
-  if(acquisitionMode!=='streamer')return recs;
+  if(acquisitionMode()!=='streamer')return recs;
   if((running||paused)&&activeReceivers.length)return activeReceivers;
   const shot=shotPositions.find(s=>s.id===selectedShotId)||shotPositions[0];
   return shot?streamerReceiversFor(shot):[];
@@ -632,7 +690,7 @@ function displayReceivers(){
 /* The nominal channel list, independent of which channels happened to fall on
    the model for a given shot. Drives the common-receiver selector. */
 function receiverChannelCatalog(){
-  if(acquisitionMode!=='streamer')return recs.map(r=>({id:r.id,label:`R${r.id} · ${r.i*DX} m`}));
+  if(acquisitionMode()!=='streamer')return recs.map(r=>({id:r.id,label:`R${r.id} · ${r.i*DX} m`}));
   const out=[],perSide=streamerChannelsPerSide();let id=0;
   streamerSideDirections().forEach(dir=>{
     for(let k=0;k<perSide;k++){id++;out.push({id,label:`Ch ${id} · offset ${(dir*(streamerNearOffset+k*streamerSpacing)).toFixed(0)} m`});}
@@ -1003,14 +1061,19 @@ function drawModel(){
   }
   // Sea column, drawn over the rock fills so the geology keeps its shape when
   // the environment is switched and only the shallowest part is overlain.
-  if(waterDepth>0){
-    const seabedY=Math.min(CH,waterDepth/(MZ*DX)*CH);
-    mc.fillStyle=WATER_COLOR;mc.fillRect(0,0,CW,seabedY);
-    mc.strokeStyle='rgba(140,215,255,.85)';mc.lineWidth=1.5;
-    mc.beginPath();mc.moveTo(0,seabedY);mc.lineTo(CW,seabedY);mc.stroke();
-    mc.fillStyle='rgba(190,225,245,.85)';mc.font='11px ui-sans-serif,sans-serif';
-    mc.fillText(`sea · ${WATER_VP} m/s · ${WATER_RHO} kg/m³ · Z ${(WATER_VP*WATER_RHO/1e6).toFixed(2)}`,8,Math.max(14,seabedY-20));
-    mc.fillText(`seabed ${waterDepth.toFixed(0)} m · R ${seabedReflectionCoefficient().toFixed(3)}`,8,Math.max(26,seabedY-6));
+  if(isOffshore()){
+    mc.fillStyle=WATER_COLOR;mc.beginPath();mc.moveTo(0,0);mc.lineTo(CW,0);
+    for(let i=MX-1;i>=0;i--)mc.lineTo(i/(MX-1)*CW,seabedFractionAt(i/(MX-1))*CH);
+    mc.closePath();mc.fill();
+    const seabedSelected=tool==='layer'&&selectedInterface===SEABED;
+    mc.strokeStyle=seabedSelected?'rgba(255,200,87,.95)':'rgba(140,215,255,.85)';mc.lineWidth=seabedSelected?2:1.5;
+    mc.beginPath();
+    for(let i=0;i<MX;i++){const x=i/(MX-1)*CW,y=seabedFractionAt(i/(MX-1))*CH;i?mc.lineTo(x,y):mc.moveTo(x,y);}
+    mc.stroke();
+    const stats=waterDepthStats(),labelY=Math.max(28,seabedFractionAt(.06)*CH-8);
+    mc.fillStyle='rgba(190,225,245,.9)';mc.font='11px ui-sans-serif,sans-serif';
+    mc.fillText(`sea · ${WATER_VP} m/s · ${WATER_RHO} kg/m³ · Z ${(WATER_VP*WATER_RHO/1e6).toFixed(2)}`,8,Math.max(14,labelY-14));
+    mc.fillText(`seabed ${stats.min.toFixed(0)}–${stats.max.toFixed(0)} m · R ${seabedReflectionCoefficient().toFixed(3)}`,8,labelY);
   }
 
   // wavefield
@@ -1082,11 +1145,11 @@ function drawModel(){
     if(shotIndex===0||shotIndex===shotPositions.length-1||shotIndex%4===0||shot.id===selectedShotId||isActive){mc.fillStyle=contributes?'#ffc857':'#fff';mc.font='10px ui-sans-serif,sans-serif';mc.fillText(`S${shot.id}`,sx-7,Math.max(12,sy-9));}
   });
   if(tool==='layer'){
-    for(let k=1;k<layers.length;k++)layers[k].knees.forEach((knee,n)=>{
-      const x=knee.x*CW,y=knee.z*CH,selected=k===selectedInterface;
+    editableBoundaryIds().forEach(id=>boundaryKnees(id).forEach((knee,n)=>{
+      const x=knee.x*CW,y=knee.z*CH,selected=id===selectedInterface;
       mc.beginPath();mc.arc(x,y,selected?5:4,0,Math.PI*2);mc.fillStyle=selected?'#ffc857':'#dbe5ef';mc.fill();mc.strokeStyle='#10151b';mc.lineWidth=2;mc.stroke();
       if(selected){mc.fillStyle='#11161d';mc.font='8px ui-sans-serif';mc.fillText(String(n+1),x-2.5,y+2.8);}
-    });
+    }));
   }
 }
 
@@ -1739,9 +1802,10 @@ function modelInterfaceDepth(interfaceIndex,modelI){
    that lies entirely under water contributes nothing. */
 function modelVerticalSegmentsAt(midpointX,maxSegments=Infinity){
   const modelI=Math.max(0,Math.min(MX-1,Math.round(midpointX/DX)));
-  const segments=[],datum=datumDepth(),floor=Math.max(datum,waterDepth);
-  if(isSubmerged()){
-    const thickness=waterDepth-datum;
+  const seabed=seabedDepthAtColumn(modelI);
+  const segments=[],datum=datumDepth(),floor=Math.max(datum,seabed);
+  if(seabed>datum){
+    const thickness=seabed-datum;
     segments.push({layerIndex:-1,thickness,velocity:WATER_VP,intervalT:2*thickness/WATER_VP});
   }
   for(let k=0;k<layers.length-1;k++){
@@ -1757,7 +1821,7 @@ function segmentDensity(segment){return segment.layerIndex<0?WATER_RHO:layers[se
 function segmentColor(segment){return segment.layerIndex<0?WATER_COLOR:layerColor(segment.layerIndex);}
 
 function modelRmsFunctionAt(midpointX){
-  let sumT=0,sumV2T=0;const points=[{t0:0,v:datumVelocity(),segmentCount:0}],delay=sourceWaveletDelay();
+  let sumT=0,sumV2T=0;const points=[{t0:0,v:datumVelocityAt(columnOf(midpointX)),segmentCount:0}],delay=sourceWaveletDelay();
   modelVerticalSegmentsAt(midpointX).forEach((segment,k)=>{
     sumT+=segment.intervalT;sumV2T+=segment.velocity*segment.velocity*segment.intervalT;
     points.push({t0:delay+sumT,v:Math.sqrt(sumV2T/sumT),segmentCount:k+1});
@@ -1769,7 +1833,7 @@ function modelRmsFunctionAt(midpointX){
    interpolation between the RMS values at adjacent interfaces. */
 function modelVAt(t0,midpointX){
   const physicalT=Math.max(0,t0-sourceWaveletDelay());
-  if(physicalT<=0)return datumVelocity();
+  if(physicalT<=0)return datumVelocityAt(columnOf(midpointX));
   let remaining=physicalT,sumT=0,sumV2T=0;
   for(const segment of modelVerticalSegmentsAt(midpointX)){
     const used=Math.min(remaining,segment.intervalT);
@@ -2650,7 +2714,7 @@ function drawGeometryStrip(){
   }
 
   // Planned/acquired survey overview.
-  ctx.fillStyle='#8a949f';ctx.fillText('SHOT LINE',10,39);ctx.fillText(acquisitionMode==='streamer'?'STREAMER':'RECEIVER LINE',10,80);
+  ctx.fillStyle='#8a949f';ctx.fillText('SHOT LINE',10,39);ctx.fillText(acquisitionMode()==='streamer'?'STREAMER':'RECEIVER LINE',10,80);
   ctx.strokeStyle='#3a444f';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(plotL,35);ctx.lineTo(plotR,35);ctx.moveTo(plotL,76);ctx.lineTo(plotR,76);ctx.stroke();
   shotPositions.forEach((shot,shotIndex)=>{
     const x=xMap(shot.i*DX),complete=shotRecords.some(record=>record.id===shot.id);ctx.fillStyle=complete?'#ff6b6b':'rgba(255,107,107,.45)';drawStar(x,35,6);
@@ -2689,11 +2753,11 @@ function drawCmpViews(){
   drawGeometryStrip();
   const info=document.getElementById('cmpInfo'),summary=document.getElementById('surveySummary');
   const shotXs=shotPositions.map(s=>s.i*DX),receiverXs=displayReceivers().map(r=>r.i*DX);
-  const surveyText=!shotXs.length?'Add shots to the survey.':acquisitionMode==='streamer'
+  const surveyText=!shotXs.length?'Add shots to the survey.':acquisitionMode()==='streamer'
     ?`${shotRecords.length}/${shotXs.length} shots acquired across ${Math.min(...shotXs).toFixed(0)}–${Math.max(...shotXs).toFixed(0)} m; ${streamerChannels}-channel streamer towed with each shot at ${streamerSpacing} m group interval.`
     :receiverXs.length?`${shotRecords.length}/${shotXs.length} shots acquired across ${Math.min(...shotXs).toFixed(0)}–${Math.max(...shotXs).toFixed(0)} m; ${receiverXs.length} receivers span ${Math.min(...receiverXs).toFixed(0)}–${Math.max(...receiverXs).toFixed(0)} m.`
     :'Add both shots and receivers.';
-  if(selectedCmpIndex===null){info.textContent='Acquire at least one shot, then build CMP gathers.';summary.textContent=`${surveyText} ${acquisitionMode==='streamer'?'Every shot carries its own spread, so fold ramps up from the ends of the line.':'The shot line is wider and the receiver line is denser.'}`;return;}
+  if(selectedCmpIndex===null){info.textContent='Acquire at least one shot, then build CMP gathers.';summary.textContent=`${surveyText} ${acquisitionMode()==='streamer'?'Every shot carries its own spread, so fold ramps up from the ends of the line.':'The shot line is wider and the receiver line is denser.'}`;return;}
   const center=cmpOrigin+selectedCmpIndex*cmpBinSize,offsets=records.map(r=>r.sourceReceiverOffset);
   const uniqueOffsets=[...new Set(offsets)].sort((a,b)=>a-b),offsetGaps=uniqueOffsets.slice(1).map((value,k)=>value-uniqueOffsets[k]).sort((a,b)=>a-b);
   const medianGap=offsetGaps.length?offsetGaps[Math.floor(offsetGaps.length/2)]:0,maxGap=offsetGaps.length?offsetGaps[offsetGaps.length-1]:0;
@@ -2899,10 +2963,10 @@ function drawFinalModelReference(ctx,L,T,pw,ph,min,max){
     ctx.strokeStyle='rgba(0,0,0,.72)';ctx.lineWidth=2.2+Math.min(3,meanR*9);traceBoundary(2);
     ctx.strokeStyle=`rgba(255,225,157,${Math.min(.95,.55+meanR*1.4)})`;ctx.lineWidth=1.2+Math.min(2.5,meanR*7);traceBoundary(0);
   }
-  ctx.fillStyle='rgba(7,12,18,.72)';ctx.fillRect(L+8,T+8,296,isSubmerged()?50:36);
+  ctx.fillStyle='rgba(7,12,18,.72)';ctx.fillRect(L+8,T+8,296,isOffshore()?50:36);
   ctx.fillStyle='#f0d38a';ctx.font='11px ui-sans-serif';ctx.fillText('ORIGINAL MODEL · VERTICAL TWT',L+16,T+23);
   ctx.fillStyle='#b8c2cc';ctx.font='10px ui-sans-serif';ctx.fillText(`includes ${(sourceWaveletDelay()*1000).toFixed(0)} ms causal-wavelet delay`,L+16,T+38);
-  if(isSubmerged())ctx.fillText(`${waterDepth.toFixed(0)} m water · seabed R ${seabedReflectionCoefficient().toFixed(3)}`,L+16,T+51);
+  if(isOffshore()){const stats=waterDepthStats();ctx.fillText(`water ${stats.min.toFixed(0)}–${stats.max.toFixed(0)} m · seabed R ${seabedReflectionCoefficient().toFixed(3)}`,L+16,T+51);}
 }
 
 function updateFinalViewControls(){
@@ -3010,8 +3074,9 @@ function collectSessionState(){
     receivers:recs.map(r=>({id:r.id,i:r.i})),
     shots:shotPositions.map(shot=>({id:shot.id,i:shot.i})),
     nextShotId,selectedShotId,
-    acquisition:{mode:acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide,
-      topBoundary,f0,tmax,simulationSpeed,environment,waterDepth},
+    acquisition:{mode:acquisitionMode(),streamerChannels,streamerSpacing,streamerNearOffset,streamerSide,
+      topBoundary,f0,tmax,simulationSpeed,environment,marineReceivers,
+      seabedKnees:seabedKnees.map(knee=>({x:knee.x,z:knee.z}))},
     processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),
       pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
       noiseLevel,velocitySource,vnmo,stretchLimit,
@@ -3054,21 +3119,26 @@ function applySessionState(state){
 
   const maxI=MX-1;
   if(Array.isArray(state.receivers)&&state.receivers.length)
-    recs=state.receivers.filter(r=>Number.isFinite(+r.i)).map((r,n)=>({id:Number.isFinite(+r.id)?+r.id:n+1,i:clampNumber(r.i,0,0,maxI),j:SURF})).sort((a,b)=>a.i-b.i);
+    recs=state.receivers.filter(r=>Number.isFinite(+r.i)).map((r,n)=>{const i=clampNumber(r.i,0,0,maxI);return{id:Number.isFinite(+r.id)?+r.id:n+1,i,j:receiverDepthCell(i)};}).sort((a,b)=>a.i-b.i);
   if(Array.isArray(state.shots)&&state.shots.length)
     shotPositions=state.shots.filter(shot=>Number.isFinite(+shot.i)).map((shot,n)=>({id:Number.isFinite(+shot.id)?+shot.id:n+1,i:clampNumber(shot.i,0,0,maxI),j:SURF})).sort((a,b)=>a.i-b.i);
   nextShotId=Math.max(1,clampNumber(state.nextShotId,shotPositions.length+1,1,1e6));
   selectedShotId=shotPositions.some(shot=>shot.id===state.selectedShotId)?state.selectedShotId:(shotPositions[0]?.id??null);
 
   const acq=state.acquisition||{};
-  acquisitionMode=pickFrom(acq.mode,['fixed','streamer'],acquisitionMode);
+
   streamerChannels=clampNumber(acq.streamerChannels,streamerChannels,2,240);
   streamerSpacing=clampNumber(acq.streamerSpacing,streamerSpacing,DX,500);
   streamerNearOffset=clampNumber(acq.streamerNearOffset,streamerNearOffset,0,2000);
   streamerSide=pickFrom(acq.streamerSide,['trailing','leading','split'],streamerSide);
   topBoundary=pickFrom(acq.topBoundary,['free','absorbing'],topBoundary);
   environment=pickFrom(acq.environment,['onshore','offshore'],environment);
-  waterDepth=environment==='offshore'?clampNumber(acq.waterDepth,150,MIN_WATER_DEPTH,MZ*DX*.6):0;
+  marineReceivers=pickFrom(acq.marineReceivers,['towed','seabed'],marineReceivers);
+  if(Array.isArray(acq.seabedKnees)&&acq.seabedKnees.length>=2){
+    const knees=acq.seabedKnees.filter(k=>k&&Number.isFinite(+k.x)&&Number.isFinite(+k.z))
+      .map(k=>({x:clampNumber(k.x,0,0,1),z:clampNumber(k.z,.15,0,1)})).sort((a,b)=>a.x-b.x);
+    if(knees.length>=2)seabedKnees=knees;
+  }
   f0=clampNumber(acq.f0,f0,8,60);
   tmax=clampNumber(acq.tmax,tmax,.4,3);
   simulationSpeed=clampNumber(acq.simulationSpeed,simulationSpeed,1,16);
@@ -3120,7 +3190,7 @@ function syncControlsFromState(proc){
   const set=(id,value)=>{const el=document.getElementById(id);if(el)el.value=value;};
   const check=(id,value)=>{const el=document.getElementById(id);if(el)el.checked=!!value;};
   set('cmpBinSize',cmpBinSize);set('freq',f0);set('tmax',tmax);set('simSpeed',simulationSpeed);
-  set('topBoundary',topBoundary);set('acqMode',acquisitionMode);
+  set('topBoundary',topBoundary);set('marineReceivers',marineReceivers);
   set('stCh',streamerChannels);set('stDx',streamerSpacing);set('stNear',streamerNearOffset);set('stSide',streamerSide);
   set('vnmo',vnmo);set('nmoGain',nmoDisplayGain);set('migAperture',migrationAperture);
   set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);set('noiseLevel',Math.round(noiseLevel*100));
@@ -3206,53 +3276,176 @@ function updateFlow(){
   Object.entries(states).forEach(([id,c])=>{document.getElementById(id).className=c;});
 }
 
+/* ---------------- resizable parameter panel ---------------- */
+/* The panel carries a lot of controls and the model canvas wants room, so the
+   split between them is the user's call, not a fixed 230 px. Width lives in a
+   CSS custom property, which both the grid column and the panel itself read,
+   so one assignment moves everything. */
+const PANEL_WIDTH_KEY='waveSandbox.panelWidth';
+const PANEL_MIN=190,PANEL_MAX=560,PANEL_DEFAULT=230;
+function setPanelWidth(px,persist){
+  const width=Math.round(Math.max(PANEL_MIN,Math.min(PANEL_MAX,px)));
+  document.documentElement.style.setProperty('--panel-w',width+'px');
+  if(persist){try{localStorage.setItem(PANEL_WIDTH_KEY,String(width));}catch(err){/* storage blocked */}}
+  return width;
+}
+function restorePanelWidth(){
+  let stored=null;
+  try{stored=localStorage.getItem(PANEL_WIDTH_KEY);}catch(err){/* storage blocked */}
+  setPanelWidth(stored?+stored:PANEL_DEFAULT,false);
+}
+(function installPanelResize(){
+  const handle=document.getElementById('panelResize'),wrap=document.getElementById('wrap');
+  if(!handle)return;
+  let dragging=false;
+  const widthFromEvent=e=>e.clientX-wrap.getBoundingClientRect().left-12;
+  handle.addEventListener('pointerdown',e=>{
+    dragging=true;handle.classList.add('dragging');
+    handle.setPointerCapture(e.pointerId);e.preventDefault();
+  });
+  handle.addEventListener('pointermove',e=>{if(dragging)setPanelWidth(widthFromEvent(e),false);});
+  const endDrag=e=>{
+    if(!dragging)return;
+    dragging=false;handle.classList.remove('dragging');
+    setPanelWidth(widthFromEvent(e),true);
+  };
+  handle.addEventListener('pointerup',endDrag);
+  handle.addEventListener('pointercancel',endDrag);
+  handle.addEventListener('dblclick',()=>setPanelWidth(PANEL_DEFAULT,true));
+  handle.addEventListener('keydown',e=>{
+    const step=e.shiftKey?40:10;
+    if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+      e.preventDefault();
+      const current=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-w'))||PANEL_DEFAULT;
+      setPanelWidth(current+(e.key==='ArrowRight'?step:-step),true);
+    }
+    if(e.key==='Home'){e.preventDefault();setPanelWidth(PANEL_DEFAULT,true);}
+  });
+})();
+
 /* ---------------- UI ---------------- */
 let tool='layer',currentStage='acquisition',selectedInterface=1,selectedLayerIndex=1,draggedKnee=null,pendingKneeContext=null;
 const hint=document.getElementById('modeHint');
 const HINTS={
-  layer:'Mode: Layer knees — drag a handle to reshape; right-click a boundary to add a knee',
+  layer:'Mode: Boundary knees — drag a handle to reshape; right-click a boundary (including the seabed) to add a knee',
   src:'Mode: Add Shot — click the surface to add; shift-click near a shot to remove it before acquisition',
   rec:'Mode: Receiver — click to add; shift-click near a receiver to remove it'
 };
 
 function modelPointer(e){const b=mCan.getBoundingClientRect();return{b,px:Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),pz:Math.max(.01,Math.min(.98,(e.clientY-b.top)/b.height))};}
+/* Boundary editing is shared between the layer interfaces and the seabed: both
+   are knee curves, so they are addressed by a single id -- an integer for the
+   interface at the top of layer[k], or SEABED. Only their validity rules
+   differ, so only boundaryCandidateValid branches. */
+function editableBoundaryIds(){
+  const ids=[];
+  if(isOffshore())ids.push(SEABED);
+  for(let k=1;k<layers.length;k++)ids.push(k);
+  return ids;
+}
+function boundaryKnees(id){return id===SEABED?seabedKnees:(layers[id]?layers[id].knees:null);}
+function setBoundaryKnees(id,knees){if(id===SEABED)seabedKnees=knees;else if(layers[id])layers[id].knees=knees;}
+function boundaryFractionAt(id,x){return id===SEABED?seabedFractionAt(x):ifaceZ(id,Math.round(Math.max(0,Math.min(1,x))*(MX-1)));}
+function boundaryLabel(id){return id===SEABED?'seabed':`interface ${id}`;}
+
+/* A layer interface may not cross its neighbours. The seabed is free to cut
+   down through the geology -- water simply replaces the rock above it -- but it
+   must stay below the acquisition datum, or the sources and receivers would end
+   up buried in rock rather than floating in water. */
+function boundaryCandidateValid(id,knees){
+  if(id===SEABED){
+    const minFraction=(datumDepth()+DX)/(MZ*DX);
+    return knees.every(p=>p.z>=minFraction&&p.z<=.97);
+  }
+  const xs=new Set(knees.map(p=>p.x));
+  layers[id-1].knees.forEach(p=>xs.add(p.x));
+  if(id+1<layers.length)layers[id+1].knees.forEach(p=>xs.add(p.x));
+  for(const x of xs){
+    const z=interpolateKnees(knees,x),above=interpolateKnees(layers[id-1].knees,x);
+    const below=id+1<layers.length?interpolateKnees(layers[id+1].knees,x):1;
+    if(z-above<MIN_LAYER_GAP||below-z<MIN_LAYER_GAP)return false;
+  }
+  return true;
+}
+
 function nearestInterface(px,pz,b,maxPixels=14){
-  let best=null;for(let k=1;k<layers.length;k++){const z=ifaceZ(k,Math.round(px*(MX-1))),distance=Math.abs(z-pz)*b.height;if(distance<=maxPixels&&(!best||distance<best.distance))best={k,distance};}return best;
+  let best=null;
+  editableBoundaryIds().forEach(id=>{
+    const distance=Math.abs(boundaryFractionAt(id,px)-pz)*b.height;
+    if(distance<=maxPixels&&(!best||distance<best.distance))best={id,distance};
+  });
+  return best;
 }
 function nearestKnee(px,pz,b,maxPixels=13){
-  let best=null;for(let k=1;k<layers.length;k++)layers[k].knees.forEach((p,n)=>{const dx=(p.x-px)*b.width,dy=(p.z-pz)*b.height,distance=Math.hypot(dx,dy);if(distance<=maxPixels&&(!best||distance<best.distance))best={k,n,distance};});return best;
+  let best=null;
+  editableBoundaryIds().forEach(id=>{
+    boundaryKnees(id).forEach((p,n)=>{
+      const dx=(p.x-px)*b.width,dy=(p.z-pz)*b.height,distance=Math.hypot(dx,dy);
+      if(distance<=maxPixels&&(!best||distance<best.distance))best={id,n,distance};
+    });
+  });
+  return best;
 }
-function interfaceCandidateValid(k,knees){
-  const xs=new Set(knees.map(p=>p.x));layers[k-1].knees.forEach(p=>xs.add(p.x));if(k+1<layers.length)layers[k+1].knees.forEach(p=>xs.add(p.x));
-  for(const x of xs){const z=interpolateKnees(knees,x),above=interpolateKnees(layers[k-1].knees,x),below=k+1<layers.length?interpolateKnees(layers[k+1].knees,x):1;if(z-above<MIN_LAYER_GAP||below-z<MIN_LAYER_GAP)return false;}return true;
-}
-function moveKnee(k,n,px,pz){
-  const source=layers[k].knees,old=source[n],left=n?source[n-1].x+.015:0,right=n+1<source.length?source[n+1].x-.015:1,target={x:n===0?0:n===source.length-1?1:Math.max(left,Math.min(right,px)),z:Math.max(.02,Math.min(.97,pz))};
+function moveKnee(id,n,px,pz){
+  const source=boundaryKnees(id),old=source[n];
+  const left=n?source[n-1].x+.015:0,right=n+1<source.length?source[n+1].x-.015:1;
+  const target={x:n===0?0:n===source.length-1?1:Math.max(left,Math.min(right,px)),z:Math.max(.02,Math.min(.97,pz))};
   const candidate=t=>source.map((p,i)=>i===n?{x:old.x+(target.x-old.x)*t,z:old.z+(target.z-old.z)*t}:{...p});
-  let trial=candidate(1);if(interfaceCandidateValid(k,trial)){layers[k].knees=trial;return;}
-  let lo=0,hi=1,best=candidate(0);for(let q=0;q<18;q++){const mid=(lo+hi)/2,test=candidate(mid);if(interfaceCandidateValid(k,test)){best=test;lo=mid;}else hi=mid;}layers[k].knees=best;
+  const trial=candidate(1);
+  if(boundaryCandidateValid(id,trial)){setBoundaryKnees(id,trial);return;}
+  // Binary-search the furthest valid point along the drag rather than refusing
+  // the move outright, so the knee slides up to its constraint.
+  let lo=0,hi=1,best=candidate(0);
+  for(let q=0;q<18;q++){const mid=(lo+hi)/2,test=candidate(mid);if(boundaryCandidateValid(id,test)){best=test;lo=mid;}else hi=mid;}
+  setBoundaryKnees(id,best);
 }
-function insertKnee(k,x){
-  const knees=layers[k].knees;if(knees.some(p=>Math.abs(p.x-x)<.012)){document.getElementById('stat').textContent='A knee already exists very close to that position.';return false;}
-  knees.push({x,z:interpolateKnees(knees,x)});knees.sort((a,b)=>a.x-b.x);selectedInterface=k;selectedLayerIndex=k;return true;
+function insertKnee(id,x){
+  const knees=boundaryKnees(id);
+  if(knees.some(p=>Math.abs(p.x-x)<.012)){document.getElementById('stat').textContent='A knee already exists very close to that position.';return false;}
+  knees.push({x,z:interpolateKnees(knees,x)});knees.sort((a,b)=>a.x-b.x);
+  selectBoundary(id);return true;
+}
+
+function selectBoundary(id){
+  selectedInterface=id;
+  if(id!==SEABED)selectedLayerIndex=id;
+}
+
+/* Resampling a boundary to a different knee count preserves its shape: the
+   existing curve is evaluated at evenly spaced positions, so raising the count
+   adds detail to work with and lowering it smooths without moving the horizon.
+   This is what lets a boundary be drawn freely rather than through five fixed
+   handles. */
+const KNEE_MIN=2,KNEE_MAX=80;
+function resampleKnees(knees,count){
+  const n=Math.max(KNEE_MIN,Math.min(KNEE_MAX,Math.round(count)));
+  return Array.from({length:n},(_,k)=>{const x=k/(n-1);return{x,z:interpolateKnees(knees,x)};});
+}
+function setBoundaryKneeCount(id,count){
+  const knees=boundaryKnees(id);
+  if(!knees)return false;
+  const resampled=resampleKnees(knees,count);
+  if(!boundaryCandidateValid(id,resampled))return false;
+  setBoundaryKnees(id,resampled);
+  return true;
 }
 
 const modelContext=document.getElementById('modelContext');
 function hideModelContext(){modelContext.classList.remove('on');pendingKneeContext=null;}
 mCan.addEventListener('contextmenu',e=>{
   if(tool!=='layer')return;const p=modelPointer(e),hit=nearestInterface(p.px,p.pz,p.b);if(!hit)return;
-  e.preventDefault();if(!surveyChangeAllowed('Model changed'))return;selectedInterface=hit.k;selectedLayerIndex=hit.k;pendingKneeContext={k:hit.k,x:p.px};refreshLayerUI();
+  e.preventDefault();if(!surveyChangeAllowed('Model changed'))return;selectBoundary(hit.id);pendingKneeContext={id:hit.id,x:p.px};refreshLayerUI();
   modelContext.style.left=Math.max(4,Math.min(p.b.width-155,e.clientX-p.b.left))+'px';modelContext.style.top=Math.max(4,Math.min(p.b.height-42,e.clientY-p.b.top))+'px';modelContext.classList.add('on');render();
 });
-document.getElementById('addKneeMenu').onclick=e=>{e.stopPropagation();if(!pendingKneeContext)return;if(insertKnee(pendingKneeContext.k,pendingKneeContext.x)){refreshLayerUI();setup();render();document.getElementById('stat').textContent=`Added knee to interface ${pendingKneeContext.k}; drag it to reshape the boundary.`;}hideModelContext();};
+document.getElementById('addKneeMenu').onclick=e=>{e.stopPropagation();if(!pendingKneeContext)return;if(insertKnee(pendingKneeContext.id,pendingKneeContext.x)){refreshLayerUI();setup();render();document.getElementById('stat').textContent=`Added a knee to the ${boundaryLabel(pendingKneeContext.id)}; drag it to reshape.`;}hideModelContext();};
 document.addEventListener('pointerdown',e=>{if(!modelContext.contains(e.target))hideModelContext();});
 
 mCan.addEventListener('pointerdown',e=>{
   if(e.button!==0||tool!=='layer')return;const p=modelPointer(e),hit=nearestKnee(p.px,p.pz,p.b);if(!hit)return;
-  if(!surveyChangeAllowed('Model changed'))return;e.preventDefault();selectedInterface=hit.k;selectedLayerIndex=hit.k;draggedKnee={k:hit.k,n:hit.n,moved:false};refreshLayerUI();render();
+  if(!surveyChangeAllowed('Model changed'))return;e.preventDefault();selectBoundary(hit.id);draggedKnee={id:hit.id,n:hit.n,moved:false};refreshLayerUI();render();
 });
 window.addEventListener('pointermove',e=>{
-  if(!draggedKnee)return;const p=modelPointer(e);moveKnee(draggedKnee.k,draggedKnee.n,p.px,p.pz);draggedKnee.moved=true;buildModel();render();
+  if(!draggedKnee)return;const p=modelPointer(e);moveKnee(draggedKnee.id,draggedKnee.n,p.px,p.pz);draggedKnee.moved=true;buildModel();render();
 });
 function endKneeDrag(){if(!draggedKnee)return;const changed=draggedKnee.moved;draggedKnee=null;if(changed){refreshLayerUI();setup();render();document.getElementById('stat').textContent='Interface knee updated; FD model rebuilt.';}}
 window.addEventListener('pointerup',endKneeDrag);
@@ -3297,10 +3490,10 @@ mCan.addEventListener('click',e=>{
     }
     render();
   } else {
-    if(acquisitionMode==='streamer'){document.getElementById('stat').textContent='Streamer mode tows its own spread — switch to Fixed spread to edit planted receivers.';return;}
+    if(acquisitionMode()==='streamer'){document.getElementById('stat').textContent='Streamer mode tows its own spread — switch to Fixed spread to edit planted receivers.';return;}
     if(!surveyChangeAllowed('Receiver geometry changed'))return;
     if(e.shiftKey){let bi=-1,bd=1e9;recs.forEach((r,n)=>{const d=Math.abs(r.i-i);if(d<bd){bd=d;bi=n;}});if(bi>=0&&bd<12)recs.splice(bi,1);}
-    else{const nextId=recs.length?Math.max(...recs.map(r=>r.id))+1:1;recs.push({id:nextId,i,j:SURF});recs.sort((a,b)=>a.i-b.i);}
+    else{const nextId=recs.length?Math.max(...recs.map(r=>r.id))+1:1;recs.push({id:nextId,i,j:receiverDepthCell(i)});recs.sort((a,b)=>a.i-b.i);}
     refreshReceiverControls();setup();render();
   }
 });
@@ -3317,11 +3510,16 @@ function refreshLayerUI(){
   });
   const hd=document.createElement('tr');hd.innerHTML='<td></td><td style="color:#8a949f">Vp</td><td style="color:#8a949f">ρ</td><td style="color:#8a949f">boundary</td>';tb.insertBefore(hd,tb.firstChild);box.appendChild(tb);
   const remove=document.getElementById('delLayer');remove.disabled=layers.length<=1;remove.textContent=layers.length<=1?'Keep one layer':`Remove #${selectedLayerIndex+1}`;
+  refreshKneeCountUI();
   const chosen=layers[selectedLayerIndex];
   document.getElementById('layerActionHint').textContent=`Selected layer ${selectedLayerIndex+1}: Vp ${chosen.vp} m/s, ρ ${chosen.rho} kg/m³, Z ${(acousticImpedance(chosen)/1e6).toFixed(2)}×10⁶ kg/m²s.`;
 }
 
-function selectLayer(index){selectedLayerIndex=Math.max(0,Math.min(layers.length-1,index));selectedInterface=selectedLayerIndex>0?selectedLayerIndex:null;setTool('layer');refreshLayerUI();render();}
+function selectLayer(index){
+  selectedLayerIndex=Math.max(0,Math.min(layers.length-1,index));
+  selectedInterface=selectedLayerIndex>0?selectedLayerIndex:null;
+  setTool('layer');refreshLayerUI();refreshKneeCountUI();render();
+}
 document.getElementById('addLayer').onclick=()=>{if(!surveyChangeAllowed('Model changed')||layers.length>=7)return;const last=layers[layers.length-1],depths=DEFAULT_KNEE_X.map(x=>Math.min(.96,(interpolateKnees(last.knees,x)+1)/2));layers.push(modelLayer(last.vp+800,last.rho+150,depths));selectedLayerIndex=layers.length-1;selectedInterface=selectedLayerIndex;refreshLayerUI();setup();render();};
 document.getElementById('delLayer').onclick=()=>{
   if(!surveyChangeAllowed('Model changed'))return;if(layers.length<=1){document.getElementById('stat').textContent='The model must retain at least one layer.';return;}
@@ -3344,12 +3542,12 @@ function applyPreset(){
   if(!surveyChangeAllowed('Receiver geometry changed'))return;
   const n=Math.max(1,Math.min(120,+document.getElementById('pgN').value||1)),sp=Math.max(DX,+document.getElementById('pgDx').value||DX),first=Math.max(0,+document.getElementById('pgOff').value||0),info=document.getElementById('pgInfo'),farX=first+(n-1)*sp;
   if(farX>MODEL_W-2*DX){const maxN=Math.floor((MODEL_W-2*DX-first)/sp)+1;info.textContent=`Spread needs ${farX.toFixed(0)} m but the model is ${MODEL_W} m wide. Max ${Math.max(0,maxN)} receivers.`;info.style.color='#ffb35c';return;}
-  recs=[];for(let k=0;k<n;k++)recs.push({id:k+1,i:Math.round((first+k*sp)/DX),j:SURF});info.textContent=`${n} fixed receivers from ${first.toFixed(0)} to ${farX.toFixed(0)} m; spacing ${sp.toFixed(0)} m.`;info.style.color='';refreshReceiverControls();setup();render();
+  recs=[];for(let k=0;k<n;k++){const i=Math.round((first+k*sp)/DX);recs.push({id:k+1,i,j:receiverDepthCell(i)});}info.textContent=`${n} fixed receivers from ${first.toFixed(0)} to ${farX.toFixed(0)} m; spacing ${sp.toFixed(0)} m.`;info.style.color='';refreshReceiverControls();setup();render();
 }
 document.getElementById('pgApply').onclick=applyPreset;
 function applyTeachingSurvey(){
   if(!surveyChangeAllowed('Survey geometry changed'))return;
-  recs=Array.from({length:DEFAULT_RECEIVER_COUNT},(_,n)=>({id:n+1,i:Math.round((DEFAULT_RECEIVER_FIRST_X+n*DEFAULT_RECEIVER_SPACING)/DX),j:SURF}));
+  recs=Array.from({length:DEFAULT_RECEIVER_COUNT},(_,n)=>{const i=Math.round((DEFAULT_RECEIVER_FIRST_X+n*DEFAULT_RECEIVER_SPACING)/DX);return{id:n+1,i,j:receiverDepthCell(i)};});
   shotPositions=DEFAULT_SHOT_X.map((x,n)=>({id:n+1,i:Math.round(x/DX),j:SURF}));nextShotId=DEFAULT_SHOT_X.length+1;selectedShotId=1;
   document.getElementById('pgN').value=DEFAULT_RECEIVER_COUNT;document.getElementById('pgDx').value=DEFAULT_RECEIVER_SPACING;document.getElementById('pgOff').value=DEFAULT_RECEIVER_FIRST_X;
   document.getElementById('pgInfo').textContent=`Teaching survey: ${shotPositions.length} shots from ${DEFAULT_SHOT_X[0]} to ${DEFAULT_SHOT_X.at(-1)} m; ${recs.length} receivers from ${DEFAULT_RECEIVER_FIRST_X} to ${DEFAULT_RECEIVER_FIRST_X+(DEFAULT_RECEIVER_COUNT-1)*DEFAULT_RECEIVER_SPACING} m.`;
@@ -3357,7 +3555,7 @@ function applyTeachingSurvey(){
 }
 document.getElementById('surveyPreset').onclick=applyTeachingSurvey;
 function calculatedSourceBounds(){
-  if(acquisitionMode==='streamer'){
+  if(acquisitionMode()==='streamer'){
     const reach=streamerNearOffset+(Math.max(1,streamerChannels)-1)*streamerSpacing,pad=Math.min(reach,MODEL_W*.32);
     return{first:Math.max(2*DX,Math.round(pad/DX)*DX),last:Math.min(MODEL_W-2*DX,Math.round((MODEL_W-pad)/DX)*DX)};
   }
@@ -3376,45 +3574,6 @@ function applySourceCountPreset(count){
 document.querySelectorAll('[data-source-count]').forEach(button=>button.onclick=()=>applySourceCountPreset(+button.dataset.sourceCount));
 document.getElementById('showRays').onchange=e=>{wavefieldBoost=e.target.checked;render();};
 
-/* Marine defaults are not cosmetic: the sea surface is a genuine free surface
-   (air over water, R = -1), so ghosts and water-column multiples are physically
-   compulsory offshore, and a marine survey tows its spread rather than planting
-   it. Switching environment therefore sets both, and says so. */
-const MIN_WATER_DEPTH=25;
-function ghostNotchHz(depth){return depth>0?WATER_VP/(2*depth):Infinity;}
-function refreshEnvironmentUI(){
-  const marine=environment==='offshore';
-  document.getElementById('marineBox').style.display=marine?'':'none';
-  document.getElementById('environment').value=environment;
-  document.getElementById('waterDepthInput').value=Math.max(MIN_WATER_DEPTH,waterDepth||150);
-  const info=document.getElementById('environmentInfo');
-  if(!marine){info.textContent='Onshore: sources and receivers are planted in rock at the acquisition datum.';return;}
-  const datum=datumDepth();
-  info.textContent=`Offshore: ${waterDepth.toFixed(0)} m of water over the model. Source and streamer sit at ${datum.toFixed(0)} m, so each carries a sea-surface ghost — at vertical incidence its first notch falls at ${ghostNotchHz(datum).toFixed(0)} Hz, moving higher with offset. Seabed R ${seabedReflectionCoefficient().toFixed(3)} over a free sea surface drives the water-column multiples.`;
-}
-function applyEnvironment(nextEnvironment,depth){
-  if(!surveyChangeAllowed('Environment changed'))return false;
-  environment=nextEnvironment==='offshore'?'offshore':'onshore';
-  if(environment==='offshore'){
-    waterDepth=Math.max(MIN_WATER_DEPTH,Math.min(MZ*DX*.6,depth||150));
-    // The sea surface is a free surface; an absorbing top would be unphysical.
-    topBoundary='free';document.getElementById('topBoundary').value='free';
-    acquisitionMode='streamer';
-  }else{
-    waterDepth=0;
-    acquisitionMode='fixed';
-  }
-  refreshEnvironmentUI();refreshAcquisitionModeUI();syncActiveReceivers();refreshReceiverControls();
-  setup();drawCmpViews();drawFinalSection();render();
-  document.getElementById('stat').textContent=environment==='offshore'
-    ?`Marine survey: ${waterDepth.toFixed(0)} m water, towed streamer, free sea surface. Re-run acquisition to record it.`
-    :'Land survey: no water column, fixed planted spread. Re-run acquisition to record it.';
-  return true;
-}
-document.getElementById('environment').onchange=e=>{
-  if(!applyEnvironment(e.target.value,+document.getElementById('waterDepthInput').value))e.target.value=environment;
-};
-document.getElementById('applyWater').onclick=()=>applyEnvironment('offshore',+document.getElementById('waterDepthInput').value);
 function describeNoise(){return noiseLevel?`${Math.round(noiseLevel*100)}% · SNR ${noiseSnrDb().toFixed(1)} dB`:'off';}
 document.getElementById('noiseLevel').oninput=e=>{
   noiseLevel=Math.max(0,(+e.target.value||0)/100);
@@ -3434,14 +3593,21 @@ function describeStreamer(){
   const perSide=streamerChannelsPerSide(),far=streamerNearOffset+(perSide-1)*streamerSpacing;
   return `${streamerChannels}-channel ${streamerSide} streamer · offsets ${streamerNearOffset}–${far} m · group interval ${streamerSpacing} m. Fold ramps up from the ends of the shot line.`;
 }
+
+/* Survey geometry shows the controls that belong to the active configuration
+   rather than offering a mode the environment has already decided. */
 function refreshAcquisitionModeUI(){
-  const streamer=acquisitionMode==='streamer';
+  const streamer=acquisitionMode()==='streamer';
   document.getElementById('streamerBox').style.display=streamer?'':'none';
-  document.getElementById('acqMode').value=acquisitionMode;
-  document.getElementById('acqModeInfo').textContent=streamer?describeStreamer():'Fixed spread: every shot records into the same planted stations.';
+  document.getElementById('fixedSpreadBox').style.display=streamer?'none':'';
+  document.getElementById('acqModeInfo').textContent=streamer
+    ?describeStreamer()
+    :isOffshore()
+      ?'Ocean-bottom nodes: a fixed array laid on the seabed, so every shot records into the same stations.'
+      :'Fixed spread: every shot records into the same planted stations.';
 }
 function applyStreamerSettings(){
-  if(!surveyChangeAllowed('Acquisition geometry changed'))return false;
+  if(!surveyChangeAllowed('Survey geometry changed'))return false;
   streamerChannels=Math.max(2,Math.min(240,+document.getElementById('stCh').value||48));
   streamerSpacing=Math.max(DX,+document.getElementById('stDx').value||25);
   streamerNearOffset=Math.max(0,+document.getElementById('stNear').value||0);
@@ -3451,15 +3617,102 @@ function applyStreamerSettings(){
   document.getElementById('stat').textContent=`Streamer set to ${streamerChannels} channels at ${streamerSpacing} m.`;
   return true;
 }
-document.getElementById('acqMode').onchange=e=>{
-  if(!surveyChangeAllowed('Acquisition geometry changed')){e.target.value=acquisitionMode;return;}
-  acquisitionMode=e.target.value==='streamer'?'streamer':'fixed';
-  refreshAcquisitionModeUI();syncActiveReceivers();refreshReceiverControls();setup();drawCmpViews();render();
-  document.getElementById('stat').textContent=acquisitionMode==='streamer'
-    ?'Towed streamer: each shot carries its own spread at fixed offsets.'
-    :'Fixed spread: all shots share the planted receiver stations.';
-};
 document.getElementById('stApply').onclick=applyStreamerSettings;
+
+/* Marine defaults are physics, not styling: the sea surface is a genuine free
+   surface (air over water, R = -1), so ghosts and water-column multiples are
+   compulsory offshore. */
+const MIN_WATER_DEPTH=25;
+function ghostNotchHz(depth){return depth>0?WATER_VP/(2*depth):Infinity;}
+function flattenSeabed(depthMetres){
+  const fraction=Math.max((datumDepth()+DX)/(MZ*DX),Math.min(.9,depthMetres/(MZ*DX)));
+  seabedKnees=resampleKnees(kneesFromDepths([fraction,fraction,fraction,fraction,fraction]),seabedKnees.length||5);
+}
+function refreshEnvironmentUI(){
+  const marine=isOffshore(),stats=waterDepthStats();
+  document.getElementById('marineBox').style.display=marine?'':'none';
+  document.getElementById('environment').value=environment;
+  document.getElementById('marineReceivers').value=marineReceivers;
+  const info=document.getElementById('environmentInfo');
+  if(!marine){info.textContent='Onshore: sources and receivers are planted in rock at the acquisition datum.';}
+  else{
+    document.getElementById('waterDepthInput').value=Math.round(stats.mean);
+    const varying=stats.max-stats.min>1;
+    info.textContent=`Offshore: water ${varying?`${stats.min.toFixed(0)}–${stats.max.toFixed(0)} m`:`${stats.mean.toFixed(0)} m`} over the model. `+
+      `Seabed R ${seabedReflectionCoefficient().toFixed(3)} over a free sea surface drives the water-column multiples.`;
+    const receiverInfo=document.getElementById('marineReceiverInfo');
+    receiverInfo.textContent=marineReceivers==='seabed'
+      ? `Nodes follow the seabed, so receiver depth varies with the horizon. The source stays at ${datumDepth().toFixed(0)} m — shot depth does not change between the two.`
+      : `Streamer and source both at ${datumDepth().toFixed(0)} m, so each carries a sea-surface ghost — at vertical incidence its first notch falls at ${ghostNotchHz(datumDepth()).toFixed(0)} Hz, moving higher with offset.`;
+  }
+  refreshKneeCountUI();
+}
+function applyEnvironment(nextEnvironment,depth){
+  if(!surveyChangeAllowed('Environment changed'))return false;
+  environment=nextEnvironment==='offshore'?'offshore':'onshore';
+  if(isOffshore()){
+    flattenSeabed(Math.max(MIN_WATER_DEPTH,Math.min(MZ*DX*.9,depth||150)));
+    topBoundary='free';document.getElementById('topBoundary').value='free';
+    if(selectedInterface===null)selectBoundary(SEABED);
+  }else{
+    if(selectedInterface===SEABED)selectBoundary(1);
+    marineReceivers='towed';
+  }
+  refreshEnvironmentUI();refreshAcquisitionModeUI();syncActiveReceivers();refreshReceiverControls();
+  setup();drawCmpViews();drawFinalSection();render();
+  const stats=waterDepthStats();
+  document.getElementById('stat').textContent=isOffshore()
+    ?`Marine survey: ${stats.mean.toFixed(0)} m water, free sea surface. Drag the seabed knees to shape it, then re-run acquisition.`
+    :'Land survey: no water column, fixed planted spread. Re-run acquisition to record it.';
+  return true;
+}
+document.getElementById('environment').onchange=e=>{
+  if(!applyEnvironment(e.target.value,+document.getElementById('waterDepthInput').value))e.target.value=environment;
+};
+document.getElementById('applyWater').onclick=()=>{
+  if(!surveyChangeAllowed('Seabed changed'))return;
+  flattenSeabed(Math.max(MIN_WATER_DEPTH,Math.min(MZ*DX*.9,+document.getElementById('waterDepthInput').value||150)));
+  refreshEnvironmentUI();syncActiveReceivers();setup();render();
+  document.getElementById('stat').textContent='Seabed flattened; drag its knees to reshape.';
+};
+document.getElementById('marineReceivers').onchange=e=>{
+  if(!surveyChangeAllowed('Receiver placement changed')){e.target.value=marineReceivers;return;}
+  marineReceivers=e.target.value==='seabed'?'seabed':'towed';
+  refreshEnvironmentUI();refreshAcquisitionModeUI();syncActiveReceivers();refreshReceiverControls();
+  setup();drawCmpViews();render();
+  document.getElementById('stat').textContent=marineReceivers==='seabed'
+    ?'Ocean-bottom nodes: receivers laid on the seabed. Shot depth unchanged.'
+    :'Towed streamer: receivers near the surface. Shot depth unchanged.';
+};
+
+/* Knee count applies to whichever boundary is selected -- a layer interface or
+   the seabed. */
+function refreshKneeCountUI(){
+  const slider=document.getElementById('kneeCount'),label=document.getElementById('kneeCountLbl'),info=document.getElementById('kneeCountInfo');
+  const id=selectedInterface,knees=id===null?null:boundaryKnees(id);
+  if(!knees){
+    slider.disabled=true;label.textContent='—';
+    info.textContent='Select a boundary — click a layer row, or click near a horizon on the model.';
+    return;
+  }
+  slider.disabled=false;slider.value=knees.length;label.textContent=String(knees.length);
+  info.textContent=`${boundaryLabel(id)} · ${knees.length} knees. Resampling keeps the horizon where it is; more knees give finer control.`;
+}
+document.getElementById('kneeCount').oninput=e=>{
+  document.getElementById('kneeCountLbl').textContent=e.target.value;
+};
+document.getElementById('kneeCount').onchange=e=>{
+  const id=selectedInterface;
+  if(id===null||!boundaryKnees(id)){refreshKneeCountUI();return;}
+  if(!surveyChangeAllowed('Model changed')){refreshKneeCountUI();return;}
+  if(!setBoundaryKneeCount(id,+e.target.value)){
+    document.getElementById('stat').textContent='That knee count would violate the minimum layer thickness.';
+    refreshKneeCountUI();return;
+  }
+  refreshKneeCountUI();refreshLayerUI();setup();render();
+  document.getElementById('stat').textContent=`${boundaryLabel(id)} resampled to ${boundaryKnees(id).length} knees.`;
+};
+
 document.getElementById('topBoundary').onchange=e=>{
   if(!surveyChangeAllowed('Surface boundary changed')){e.target.value=topBoundary;return;}
   topBoundary=e.target.value==='absorbing'?'absorbing':'free';
@@ -3702,14 +3955,15 @@ function runNumericalChecks(){
     pass:Math.abs(apexAfter.index*migDt-migApexT0)<=2*migDt&&apexAfter.value>.7&&Math.abs(flankAfter)<.25*Math.abs(flankBefore)});
 
   // --- streamer geometry --------------------------------------------------
-  const savedGeometry=[acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide];
-  acquisitionMode='streamer';streamerChannels=6;streamerSpacing=50;streamerNearOffset=100;streamerSide='trailing';
+  // Acquisition mode is derived, so the test drives its inputs instead.
+  const savedGeometry=[environment,marineReceivers,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide];
+  environment='offshore';marineReceivers='towed';streamerChannels=6;streamerSpacing=50;streamerNearOffset=100;streamerSide='trailing';
   const centreShot={id:1,i:Math.round(MX/2),j:SURF},centreLayout=streamerReceiversFor(centreShot);
   const centreOffsets=centreLayout.map(r=>(r.i-centreShot.i)*DX).sort((a,b)=>a-b);
   const edgeShot={id:2,i:Math.round(120/DX),j:SURF},edgeLayout=streamerReceiversFor(edgeShot);
   const nominalOffset=id=>-(streamerNearOffset+(id-1)*streamerSpacing);
   const edgeConsistent=edgeLayout.every(r=>Math.abs((r.i-edgeShot.i)*DX-nominalOffset(r.id))<=DX/2+1e-9);
-  [acquisitionMode,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide]=savedGeometry;
+  [environment,marineReceivers,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide]=savedGeometry;
   syncActiveReceivers();
   results.push({test:'streamer offsets stay fixed relative to the shot',
     pass:centreOffsets.length===6&&Math.abs(centreOffsets[0]+350)<1e-9&&Math.abs(centreOffsets[5]+100)<1e-9});
@@ -3761,36 +4015,72 @@ function runNumericalChecks(){
     pass:Math.abs(fieldBeyondLo-2000)<1e-9&&Math.abs(fieldBeyondHi-3000)<1e-9});
 
   // --- onshore / offshore -------------------------------------------------
-  const savedEnvironment=environment,savedWaterDepth=waterDepth;
+  const savedEnvironment=environment,savedSeabed=seabedKnees,savedPlacement=marineReceivers;
   const dryColumn=modelVerticalSegmentsAt(MX*DX/2);
-  environment='offshore';waterDepth=150;
-  const wetColumn=modelVerticalSegmentsAt(MX*DX/2);
-  const waterSegment=wetColumn[0];
+  environment='offshore';seabedKnees=kneesFromDepths([.15,.15,.15,.15,.15]);
+  const wetColumn=modelVerticalSegmentsAt(MX*DX/2),waterSegment=wetColumn[0];
   const expectedWaterTime=2*(150-datumDepth())/WATER_VP;
   results.push({test:'offshore prepends a water segment at 1500 m/s',
     pass:waterSegment&&waterSegment.layerIndex===-1&&waterSegment.velocity===WATER_VP
       &&Math.abs(waterSegment.intervalT-expectedWaterTime)<1e-9});
-  // Water replaces the shallowest rock rather than pushing the geology down, so
-  // the total column time must FALL (water is slower, but it displaces the
-  // interval it covers) and the deep interfaces must keep their identity.
   const totalTimeOf=column=>column.reduce((sum,segment)=>sum+segment.intervalT,0);
   results.push({test:'water replaces shallow rock instead of displacing the section',
     pass:wetColumn.length>=dryColumn.length&&totalTimeOf(wetColumn)>totalTimeOf(dryColumn)});
   results.push({test:'RMS velocity at the datum is the water velocity offshore',
     pass:Math.abs(modelVAt(0,MX*DX/2)-WATER_VP)<1e-9&&Math.abs(modelRmsFunctionAt(MX*DX/2)[0].v-WATER_VP)<1e-9});
-  // The seabed is a real impedance boundary and must appear in the interface list.
   const wetInterfaces=modelInterfacesAt(MX*DX/2);
   results.push({test:'seabed appears as the first interface with the right R',
     pass:wetInterfaces.length&&Math.abs(wetInterfaces[0].R-seabedReflectionCoefficient())<1e-9
       &&Math.abs(wetInterfaces[0].time-(sourceWaveletDelay()+expectedWaterTime))<1e-9});
-  // A layer entirely above the seabed must contribute nothing.
-  waterDepth=Math.min(MZ*DX*.6,modelInterfaceDepth(1,Math.round(MX/2))+40);
-  const drownedColumn=modelVerticalSegmentsAt(MX*DX/2);
-  results.push({test:'units above the seabed contribute no interval',
-    pass:drownedColumn.every(segment=>segment.layerIndex!==0)});
-  environment=savedEnvironment;waterDepth=savedWaterDepth;
+
+  // A DIPPING seabed must give a laterally varying water thickness, which is
+  // the whole point of it being a horizon rather than a number.
+  seabedKnees=kneesFromDepths([.10,.10,.20,.30,.30]);
+  const shallowWater=modelVerticalSegmentsAt(0)[0],deepWater=modelVerticalSegmentsAt((MX-1)*DX)[0];
+  results.push({test:'a dipping seabed varies water thickness across the model',
+    pass:shallowWater&&deepWater&&deepWater.thickness>shallowWater.thickness+50
+      &&Math.abs(shallowWater.thickness-(100-datumDepth()))<1e-6});
+
+  // Receiver placement: nodes follow the seabed, the shot never moves.
+  marineReceivers='seabed';
+  const shallowCell=receiverDepthCell(0),deepCell=receiverDepthCell(MX-1);
+  marineReceivers='towed';
+  const towedCell=receiverDepthCell(MX-1);
+  results.push({test:'ocean-bottom receivers follow the seabed, towed ones do not',
+    pass:deepCell>shallowCell&&towedCell===SURF&&shallowCell>=SURF});
+  results.push({test:'ocean-bottom nodes stay in the water above the seabed',
+    pass:(()=>{marineReceivers='seabed';
+      const ok=[0,MX>>1,MX-1].every(i=>receiverDepthCell(i)*DX<seabedDepthAtColumn(i));
+      marineReceivers='towed';return ok;})()});
+  results.push({test:'acquisition mode follows environment and receiver placement',
+    pass:(()=>{const before=acquisitionMode();marineReceivers='seabed';
+      const nodes=acquisitionMode();marineReceivers='towed';
+      const towed=acquisitionMode();environment='onshore';
+      const land=acquisitionMode();environment='offshore';
+      return before==='streamer'&&nodes==='fixed'&&towed==='streamer'&&land==='fixed';})()});
+
+  seabedKnees=savedSeabed;environment=savedEnvironment;marineReceivers=savedPlacement;
   results.push({test:'switching back onshore restores the dry column exactly',
     pass:JSON.stringify(modelVerticalSegmentsAt(MX*DX/2))===JSON.stringify(dryColumn)});
+
+  // --- knee resampling ----------------------------------------------------
+  // Resampling must preserve the horizon, not just its endpoints: a curve
+  // resampled to more knees and read back must land on the original.
+  const shapeKnees=kneesFromDepths(smoothFoldDepths(.62,.30));
+  const denser=resampleKnees(shapeKnees,41),sparser=resampleKnees(shapeKnees,5);
+  let worstShapeError=0;
+  for(let k=0;k<=40;k++){
+    const x=k/40;
+    worstShapeError=Math.max(worstShapeError,Math.abs(interpolateKnees(denser,x)-interpolateKnees(shapeKnees,x)));
+  }
+  results.push({test:'raising the knee count leaves the horizon where it was',
+    pass:denser.length===41&&worstShapeError<1e-9});
+  results.push({test:'knee resampling keeps the ends anchored and stays ordered',
+    pass:sparser.length===5&&sparser[0].x===0&&sparser[4].x===1
+      &&sparser.every((knee,k)=>k===0||knee.x>sparser[k-1].x)
+      &&Math.abs(interpolateKnees(sparser,.5)-interpolateKnees(shapeKnees,.5))<1e-9});
+  results.push({test:'knee count is clamped to the editable range',
+    pass:resampleKnees(shapeKnees,1).length===KNEE_MIN&&resampleKnees(shapeKnees,999).length===KNEE_MAX});
 
   // --- one kernel, two execution paths -----------------------------------
   // The worker script is generated from the kernel's own source, so this
@@ -3816,6 +4106,7 @@ let lastSelfTest=null;
 function selfTestSummary(){return lastSelfTest;}
 
 /* init */
+restorePanelWidth();
 ensureSolverWorker();updateSolverPathReadout();noteSavedSession();
 refreshLayerUI();updateModelPresetInfo();refreshEnvironmentUI();refreshAcquisitionModeUI();refreshReceiverControls();setup();buildCmpBins(false);refreshShotGallery();drawAcquisitionViews();drawCmpViews();drawFinalSection();updateFlow();render();runNumericalChecks();frame();
 </script>

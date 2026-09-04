@@ -280,6 +280,7 @@
           <button id="tabCommonShot" class="tab on">Common Shot</button>
           <button id="tabCommonReceiver" class="tab">Common Receiver</button>
           <button id="tabOffset" class="tab">Common Offset</button>
+          <button id="tabGain" class="tab">Gain</button>
           <button id="tabDecon" class="tab">Deconvolution</button>
           <button id="tabSpectrum" class="tab">Spectrum &amp; Filter</button>
         </div>
@@ -303,6 +304,23 @@
           <div class="hint" id="offsetInfo">Acquire shots to build common-offset gathers.</div>
           <canvas id="offsetGather" class="selected-gather" width="1100" height="660" aria-label="Common offset gather"></canvas>
           <div class="note">Every trace here was recorded at nearly the same source–receiver distance, laid out by midpoint. Because the moveout is constant across the display, structure reads directly — this is the closest thing to a section available before any processing.</div>
+        </div>
+        <div id="gainView" style="display:none">
+          <div class="toolbar">
+            <label>Recovery <select id="gainMode">
+              <option value="none">None — raw recorded amplitude</option>
+              <option value="spreading">√t — 2D cylindrical spreading</option>
+              <option value="linear">t — 3D convention</option>
+              <option value="agc">AGC — window RMS</option>
+            </select></label>
+            <label id="agcWindowBox" style="display:none">Window <input type="number" id="agcWindow" value="250" min="20" max="2000" step="10" style="width:74px"> ms</label>
+          </div>
+          <div class="hint" id="gainInfo">Acquire shots to measure how amplitude decays down the record.</div>
+          <canvas id="gainCanvas" class="selected-gather" width="1100" height="360" aria-label="Trace RMS against time, before and after amplitude recovery"></canvas>
+          <div class="note"><b>Left:</b> the peak amplitude of the first arrival against offset, on log axes, where geometric spreading can be measured without reflectivity confusing it. Two reference slopes are drawn. <b>r<sup>−0.50</sup></b> is spreading alone: this is a 2D simulation, so the source is a line and the wavefront a cylinder, and energy spreads over 2πr rather than 4πr². <b>r<sup>−1.50</sup></b> adds the free-surface ghost — source and receivers sit a few metres down, and for a nearly horizontal path the delay to their surface images shrinks as 1/r, so the ghost pair cancels ever more completely with offset. The measured points follow the second, not the first.</div>
+          <div class="note"><b>Right:</b> mean trace RMS down the record, before and after gain, with the trend each carries. Note that the raw record does not simply decay — it is loudest around the strongest reflector, not at the first break — which is why the reported number is the fitted slope from the first break rather than a drop from the peak.</div>
+          <div class="note">So neither <b>√t</b> (2D spreading alone) nor <b>t</b> (the 3D convention) is the correct compensation for this geometry — which is the useful lesson: source and receiver depth are acquisition decisions that processing then has to live with. <b>AGC</b> sidesteps the question by normalising each window to the same level, which is why it makes weak deep events visible and why it destroys the relative amplitudes any amplitude interpretation depends on.</div>
+          <div class="note warning">Gain multiplies signal and noise by the same number, so it does not improve signal-to-noise at any sample on the record. Turn the noise up and watch the deep part of the gained record get louder and no cleaner.</div>
         </div>
         <div id="deconView" style="display:none">
           <div class="toolbar">
@@ -905,15 +923,13 @@ function buildTraceDatabase(){
     // the CMP gathers, semblance, NMO and stack all see filtered data without
     // any of them knowing a filter exists. `rawSamples` is kept for the
     // before/after spectrum display.
-    const raw=shot.traces[k];
     const doFilter=filterEnabled&&validFilterCorners(filterCorners);
-    const noiseAmplitude=noiseLevel*(shot.signalRms||0);
-    const noiseSource=noiseAmplitude>0&&shot.noise?shot.noise[k]:null;
-    let noiseRaw=null;
-    if(noiseSource){
-      noiseRaw=new Float32Array(shot.nt);
-      for(let i=0;i<shot.nt;i++)noiseRaw[i]=noiseSource[i]*noiseAmplitude;
-    }
+    // Gain first, exactly as in a real sequence: deconvolution assumes a
+    // stationary wavelet, and spreading is the largest non-stationarity there
+    // is. `shotInputTraces` is what designDeconForShot sees too, so the
+    // operator is always designed on the data it is applied to.
+    const input=shotInputTraces(shot,k);
+    const raw=input.clean,noiseRaw=input.noise;
     const deconvolve=trace=>deconDesign?applyPredictionErrorFilter(trace,deconDesign.operator,deconDesign.lag):trace;
     const cleanDecon=deconvolve(raw),noiseDecon=noiseRaw?deconvolve(noiseRaw):null;
     let unfiltered=cleanDecon;
@@ -1467,6 +1483,120 @@ function signalRmsOfShot(traceList){
 
 function noiseSnrDb(){return noiseLevel>0?20*Math.log10(1/noiseLevel):Infinity;}
 
+/* ---------------- amplitude recovery (gain) ---------------- */
+/* The first step of a real processing sequence: undo the amplitude decay that
+   has nothing to do with reflectivity, so that what is left can be compared
+   from top to bottom of the record.
+
+   THE EXPONENT HERE IS NOT THE TEXTBOOK ONE, AND THE PANEL MEASURES IT RATHER
+   THAN ASSUMING IT. Two effects compound:
+
+     * The simulation is 2D, so the "point" source is really a line source and
+       the wavefront is a cylinder. Energy spreads over 2*pi*r instead of
+       4*pi*r^2, so amplitude falls as r^-0.5 -- not the r^-1 of a 3D survey.
+
+     * Source and receivers sit a few cells under a free surface, so each has a
+       ghost. For a direct wave travelling nearly horizontally the path
+       difference to the surface image shrinks as 1/r, so the ghost pair
+       cancels ever more completely with offset and contributes a further 1/r.
+
+   Superposing the direct and image arrivals predicts r^-1.50 for the default
+   geometry; the simulation measures r^-1.55 over 155-935 m. So neither sqrt(t)
+   (2D spreading alone) nor t (the 3D convention) is the correct compensation
+   near a free surface, which is exactly why source and receiver depth are
+   acquisition decisions rather than details. The panel plots the measurement
+   against both reference slopes and lets the user see the gap.
+
+   Gain does NOT improve signal-to-noise. It multiplies signal and noise by the
+   same number, so the ratio at any given time is untouched -- it only makes the
+   deep data visible. AGC goes further and destroys relative amplitude
+   altogether, which is why it is a display and QC tool rather than something to
+   stack through. Both of those are visible in the panel. */
+let gainMode='none',agcWindowMs=250;
+const AGC_MAX_BOOST=20;   // 26 dB, measured against the loudest window on the trace
+const GAIN_MODES=['none','spreading','linear','agc'];
+
+/* Sliding-window RMS, computed with a running sum so a long window costs the
+   same as a short one. */
+function slidingRms(samples,halfWindow){
+  const n=samples.length,out=new Float64Array(n);
+  let sum=0,count=0,lo=0,hi=-1;
+  for(let i=0;i<n;i++){
+    const wantLo=Math.max(0,i-halfWindow),wantHi=Math.min(n-1,i+halfWindow);
+    while(hi<wantHi){hi++;sum+=samples[hi]*samples[hi];count++;}
+    while(lo<wantLo){sum-=samples[lo]*samples[lo];count--;lo++;}
+    out[i]=count>0?Math.sqrt(Math.max(0,sum)/count):0;
+  }
+  return out;
+}
+
+/* The scalar the gain applies at each sample. Derived once from the COMBINED
+   record (signal plus noise) and then applied to each component separately:
+   AGC is not a linear operator, so deriving it per component would leave the
+   parts no longer adding up to the whole, and the SNR bookkeeping downstream
+   would quietly stop being true. */
+function gainScalars(clean,noise,dt,mode=gainMode){
+  if(mode==='none'||!clean||!clean.length)return null;
+  const n=clean.length,g=new Float64Array(n);
+  if(mode==='agc'){
+    const combined=new Float64Array(n);
+    for(let i=0;i<n;i++)combined[i]=clean[i]+(noise?noise[i]:0);
+    const halfWindow=Math.max(1,Math.round(agcWindowMs/1000/dt/2));
+    const rms=slidingRms(combined,halfWindow);
+    /* The boost is capped. A window whose RMS is a rounding error away from
+       zero -- ahead of the first break, or on a dead trace -- would otherwise be
+       handed an unbounded scalar, and an unbounded AGC on a dead sample is how a
+       record grows events that were never recorded: the arithmetic dust before
+       the first arrival comes up to the level of the real data. Capping the
+       boost at AGC_MAX_BOOST leaves ample range for the ~13 dB a record of this
+       length actually decays, while leaving dead samples dead. */
+    let peak=0;for(let i=0;i<n;i++)if(rms[i]>peak)peak=rms[i];
+    if(peak<=0)return null;
+    const floor=peak/AGC_MAX_BOOST;
+    for(let i=0;i<n;i++)g[i]=1/Math.max(floor,rms[i]);
+  }else{
+    const power=mode==='linear'?1:.5;
+    for(let i=0;i<n;i++)g[i]=Math.pow(Math.max(i,1)*dt,power);
+  }
+  // Normalise to unit RMS so toggling the mode redistributes amplitude down the
+  // trace without also changing the overall level under the display gain.
+  let sum=0;for(let i=0;i<n;i++)sum+=g[i]*g[i];
+  const norm=Math.sqrt(sum/n);
+  if(!(norm>0))return null;
+  for(let i=0;i<n;i++)g[i]/=norm;
+  return g;
+}
+
+function applyGainScalars(samples,g){
+  if(!samples||!g)return samples;
+  const out=new Float32Array(samples.length);
+  for(let i=0;i<samples.length;i++)out[i]=samples[i]*g[i];
+  return out;
+}
+
+/* The recorded trace as processing sees it: noise scaled to the requested
+   level, then gain applied to both components with one shared scalar. Used by
+   the trace database and by the deconvolution design, so the operator is always
+   designed on the same data it will be applied to. */
+function shotInputTraces(shot,k){
+  const raw=shot.traces[k];
+  const noiseAmplitude=noiseLevel*(shot.signalRms||0);
+  let noiseRaw=null;
+  if(noiseAmplitude>0&&shot.noise&&shot.noise[k]){
+    noiseRaw=new Float32Array(shot.nt);
+    for(let i=0;i<shot.nt;i++)noiseRaw[i]=shot.noise[k][i]*noiseAmplitude;
+  }
+  const g=gainScalars(raw,noiseRaw,shot.dt);
+  if(!g)return{clean:raw,noise:noiseRaw,gain:null};
+  return{clean:applyGainScalars(raw,g),noise:applyGainScalars(noiseRaw,g),gain:g};
+}
+
+function gainModeLabel(mode=gainMode){
+  return mode==='spreading'?'√t · 2D cylindrical spreading'
+    :mode==='linear'?'t · 3D convention (over-corrects here)'
+    :mode==='agc'?`AGC · ${agcWindowMs} ms window`:'none';
+}
+
 /* ---------------- deconvolution ---------------- */
 /* Multiples are generated by the free surface and can be switched off at the
    boundary, but switching them off is not processing. Predictive deconvolution
@@ -1562,14 +1692,14 @@ function designDeconForShot(shot){
   const operatorSamples=Math.max(2,Math.min(400,Math.round(deconOperatorMs/1000/shot.dt)));
   const maxLag=lagSamples+operatorSamples+1;
   if(maxLag>=shot.nt)return null;
-  const noiseAmplitude=noiseLevel*(shot.signalRms||0);
   const stride=Math.max(1,Math.floor(shot.traces.length/12));
   let sum=null,used=0;
   for(let k=0;k<shot.traces.length;k+=stride){
-    let design=shot.traces[k];
-    if(noiseAmplitude>0&&shot.noise&&shot.noise[k]){
+    const input=shotInputTraces(shot,k);
+    let design=input.clean;
+    if(input.noise){
       design=new Float32Array(shot.nt);
-      for(let i=0;i<shot.nt;i++)design[i]=shot.traces[k][i]+shot.noise[k][i]*noiseAmplitude;
+      for(let i=0;i<shot.nt;i++)design[i]=input.clean[i]+input.noise[i];
     }
     const ac=autocorrelation(design,maxLag);
     if(!sum)sum=new Float64Array(maxLag+1);
@@ -2011,6 +2141,7 @@ function drawAcquisitionViews(){
   document.querySelectorAll('.shot-card canvas').forEach(cv=>drawTraceGather(cv,cv._traceRecords||[],{compact:true,axis:document.getElementById('shotAxis').value}));
   if(spectrumViewVisible())drawSpectrum();
   if(offsetViewVisible()){refreshOffsetBins();drawOffsetGather();}
+  if(gainViewVisible())drawGainPanel();
   if(deconViewVisible())drawDeconPanel();
 }
 
@@ -3590,6 +3721,8 @@ function collectSessionState(){
       pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
       noiseLevel,velocitySource,vnmo,stretchLimit,
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
+      gainMode,agcWindowMs,
+      deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
       migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
   };
@@ -3675,6 +3808,13 @@ function applySessionState(state){
   const corners=Array.isArray(proc.filterCorners)?proc.filterCorners.map(Number):null;
   if(corners&&validFilterCorners(corners))filterCorners=corners;
   filterEnabled=!!proc.filterEnabled&&validFilterCorners(filterCorners);
+  gainMode=pickFrom(proc.gainMode,GAIN_MODES,gainMode);
+  agcWindowMs=clampNumber(proc.agcWindowMs,agcWindowMs,20,2000);
+  deconEnabled=!!proc.deconEnabled;
+  deconMode=pickFrom(proc.deconMode,['predictive','spiking'],deconMode);
+  deconLagMs=clampNumber(proc.deconLagMs,deconLagMs,0,2000);
+  deconOperatorMs=clampNumber(proc.deconOperatorMs,deconOperatorMs,4,1000);
+  deconPrewhiten=clampNumber(proc.deconPrewhiten,deconPrewhiten,0,50);
   migrationAperture=clampNumber(proc.migrationAperture,migrationAperture,50,5000);
 
   const disp=state.display||{};
@@ -3707,7 +3847,11 @@ function syncControlsFromState(proc){
   [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
   if(proc&&proc.minFold)set('minFold',proc.minFold);
   if(proc&&proc.allVelocity)set('allVelocity',proc.allVelocity);
-  check('topMuteOn',topMuteEnabled);check('filterOn',filterEnabled);
+  set('gainMode',gainMode);set('agcWindow',agcWindowMs);
+  set('deconMode',deconMode);set('deconLag',deconLagMs);set('deconOperator',deconOperatorMs);set('deconPrewhiten',deconPrewhiten);
+  check('topMuteOn',topMuteEnabled);check('filterOn',filterEnabled);check('deconOn',deconEnabled);
+  const agcBox=document.getElementById('agcWindowBox');
+  if(agcBox)agcBox.style.display=gainMode==='agc'?'':'none';
   check('nmoDensity',nmoDensity);check('exactMoveout',showExactMoveout);check('showRays',wavefieldBoost);
   const radio=document.querySelector(`input[name="velocitySource"][value="${velocitySource}"]`);
   if(radio)radio.checked=true;
@@ -4241,21 +4385,273 @@ function setStage(stage){
 }
 document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>setStage(b.dataset.stage));
 function setAcquisitionSubtab(which){
-  const views={shot:'commonShotView',receiver:'commonReceiverView',offset:'offsetView',decon:'deconView',spectrum:'spectrumView'};
-  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',offset:'tabOffset',decon:'tabDecon',spectrum:'tabSpectrum'};
+  const views={shot:'commonShotView',receiver:'commonReceiverView',offset:'offsetView',gain:'gainView',decon:'deconView',spectrum:'spectrumView'};
+  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',offset:'tabOffset',gain:'tabGain',decon:'tabDecon',spectrum:'tabSpectrum'};
   Object.entries(views).forEach(([key,id])=>{document.getElementById(id).style.display=key===which?'':'none';});
   Object.entries(tabs).forEach(([key,id])=>{document.getElementById(id).classList.toggle('on',key===which);});
   if(which==='receiver')drawAcquisitionViews();
   if(which==='offset'){refreshOffsetBins();drawOffsetGather();}
+  if(which==='gain')drawGainPanel();
   if(which==='decon')drawDeconPanel();
   if(which==='spectrum')drawSpectrum();
 }
 document.getElementById('tabCommonShot').onclick=()=>setAcquisitionSubtab('shot');
 document.getElementById('tabCommonReceiver').onclick=()=>setAcquisitionSubtab('receiver');
 document.getElementById('tabOffset').onclick=()=>setAcquisitionSubtab('offset');
+document.getElementById('tabGain').onclick=()=>setAcquisitionSubtab('gain');
 document.getElementById('tabDecon').onclick=()=>setAcquisitionSubtab('decon');
 document.getElementById('tabSpectrum').onclick=()=>setAcquisitionSubtab('spectrum');
 
+/* ---------------- gain panel ---------------- */
+/* Mean trace RMS against time, in decibels. Averaged over the whole shot so a
+   single strong reflector cannot masquerade as a trend: what is left is the
+   decay the gain is there to undo. */
+function shotRmsProfile(shot,gained){
+  const bins=90,nt=shot.nt,sum=new Float64Array(bins),count=new Float64Array(bins);
+  for(let k=0;k<shot.traces.length;k++){
+    const trace=gained?shotInputTraces(shot,k):{clean:shot.traces[k],noise:null};
+    const clean=trace.clean,noise=trace.noise;
+    for(let i=0;i<nt;i++){
+      const b=Math.min(bins-1,Math.floor(i/nt*bins));
+      const v=clean[i]+(noise?noise[i]:0);
+      sum[b]+=v*v;count[b]++;
+    }
+  }
+  /* Smooth over at least one wavelet period before taking the root. A bin here
+     is a few milliseconds wide, far shorter than the 1/f0 period of the wavelet
+     itself, so an unsmoothed profile measures the oscillation of individual
+     events rather than the decay of the record -- it swings tens of decibels
+     between neighbouring bins and no gain setting can appear to flatten it. */
+  const record=nt*shot.dt;
+  const half=Math.max(1,Math.round(bins/Math.max(1e-6,record*f0)));
+  const out=new Float64Array(bins);
+  for(let b=0;b<bins;b++){
+    let s=0,n=0;
+    for(let q=Math.max(0,b-half);q<=Math.min(bins-1,b+half);q++){s+=sum[q];n+=count[q];}
+    out[b]=n?Math.sqrt(s/n):0;
+  }
+  return out;
+}
+
+/* Peak amplitude of the first arrival against source-receiver distance, which
+   is where geometric spreading is measurable without reflectivity confusing it.
+   Offsets shorter than a few wavelengths are dropped: the far-field r^-n form
+   does not hold there, and the source cell itself is singular. */
+function firstBreakDecay(shot){
+  const velocity=datumVelocityAt(Math.max(0,Math.min(MX-1,shot.sourceI)));
+  if(!(velocity>0))return null;
+  const delay=sourceWaveletDelay(),halfWindow=Math.max(2,Math.round(1/f0/shot.dt));
+  const minOffset=Math.max(100,3*velocity/f0/2);
+  const points=[];
+  shot.receivers.forEach((receiver,k)=>{
+    const offset=Math.abs(receiver.x-shot.sourceX);
+    if(offset<minOffset)return;
+    const centre=Math.round((offset/velocity+delay)/shot.dt);
+    if(centre-halfWindow<0||centre+halfWindow>=shot.nt)return;
+    const trace=shot.traces[k];
+    let peak=0;
+    for(let i=centre-halfWindow;i<=centre+halfWindow;i++)peak=Math.max(peak,Math.abs(trace[i]));
+    if(peak>0)points.push({offset,amplitude:peak});
+  });
+  if(points.length<4)return null;
+  points.sort((a,b)=>a.offset-b.offset);
+  // Least squares in log-log: the slope IS the spreading exponent.
+  let n=0,sx=0,sy=0,sxx=0,sxy=0;
+  points.forEach(({offset,amplitude})=>{
+    const x=Math.log(offset),y=Math.log(amplitude);
+    n++;sx+=x;sy+=y;sxx+=x*x;sxy+=x*y;
+  });
+  const denom=n*sxx-sx*sx;
+  if(!(Math.abs(denom)>1e-12))return null;
+  const exponent=(n*sxy-sx*sy)/denom,intercept=(sy*sxx-sx*sxy)/denom;
+  return{points,exponent,intercept,velocity,minOffset};
+}
+
+function drawGainPanel(){
+  const cv=document.getElementById('gainCanvas');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('gainInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='11px ui-sans-serif,system-ui,sans-serif';
+  const shot=shotRecords.find(record=>record.id===selectedShotId)||shotRecords[0];
+  if(!shot){
+    ctx.fillStyle='#8a949f';ctx.fillText('Acquire shots to measure the amplitude decay.',60,40);
+    info.textContent='Acquire shots to measure how amplitude decays with distance and down the record.';
+    return;
+  }
+  const gap=26,halfW=(W-gap)/2;
+  const decay=drawSpreadingPlot(ctx,0,0,halfW,H,shot);
+  const trend=drawRecordTrendPlot(ctx,halfW+gap,0,halfW,H,shot);
+  ctx.strokeStyle='#232a33';ctx.beginPath();
+  ctx.moveTo(halfW+gap/2,10);ctx.lineTo(halfW+gap/2,H-10);ctx.stroke();
+
+  const rate=f=>f?`${f>0?'+':''}${f.toFixed(0)} dB/s`:'—';
+  info.innerHTML=`Shot S${shot.id} · ${shot.traces.length} traces · record ${(shot.nt*shot.dt).toFixed(2)} s`+
+    (decay?`<br>first arrivals fall as <b>r<sup>${decay.exponent.toFixed(2)}</sup></b> over ${decay.points[0].offset.toFixed(0)}–${decay.points[decay.points.length-1].offset.toFixed(0)} m`+
+      ` — steeper than the r<sup>−0.50</sup> of 2D spreading alone, because source and receivers are ${(SURF*DX).toFixed(0)} m under a free surface and their ghosts cancel harder with offset (two-path superposition predicts r<sup>−1.50</sup>).`
+      :'<br>not enough usable offsets to measure the spreading law.')+
+    `<br>record trend ${rate(trend&&trend.before)}`+
+    (gainMode==='none'?' · no recovery applied'
+      :` · after ${gainModeLabel()}: ${rate(trend&&trend.after)}`+
+        (trend&&trend.after!==null&&trend.before!==null?` (${Math.abs(trend.after)<Math.abs(trend.before)?'flatter':'steeper'})`:''));
+}
+
+/* LEFT PLOT: measured first-break amplitude against offset, log-log, with the
+   two reference slopes it is usually assumed to follow. The point of the plot
+   is that it follows neither. */
+function drawSpreadingPlot(ctx,x0,y0,w,h,shot){
+  const L=x0+54,R=14,T=y0+24,B=40,pw=w-(L-x0)-R,ph=h-(T-y0)-B;
+  const decay=firstBreakDecay(shot);
+  ctx.fillStyle='#8a949f';ctx.fillText('first-break amplitude vs offset',L,y0+14);
+  if(!decay){
+    ctx.fillStyle='#65717e';ctx.fillText('Not enough offsets beyond the near-field limit.',L,T+20);
+    return null;
+  }
+  const xs=decay.points.map(q=>Math.log10(q.offset)),ys=decay.points.map(q=>Math.log10(q.amplitude));
+  const xLo=Math.min(...xs),xHi=Math.max(...xs);
+  const refAt=(logR,exponent)=>ys[0]+exponent*(logR-xs[0]);
+  const candidates=ys.concat([refAt(xHi,-.5),refAt(xHi,-1.5)]);
+  const yLo=Math.min(...candidates),yHi=Math.max(...candidates);
+  const padY=(yHi-yLo)*.12||1;
+  const xOf=v=>L+(v-xLo)/Math.max(1e-9,xHi-xLo)*pw;
+  const yOf=v=>T+ph-(v-(yLo-padY))/Math.max(1e-9,(yHi+padY)-(yLo-padY))*ph;
+
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
+  for(let q=0;q<=4;q++){
+    const y=T+q/4*ph;
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+  }
+  [xLo,(xLo+xHi)/2,xHi].forEach(v=>{
+    const x=xOf(v);
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    ctx.textAlign='center';ctx.fillText(Math.pow(10,v).toFixed(0),x,T+ph+16);ctx.textAlign='left';
+  });
+  ctx.fillStyle='#8a949f';ctx.textAlign='center';
+  ctx.fillText('source–receiver offset (m, log)',L+pw/2,y0+h-6);ctx.textAlign='left';
+  ctx.save();ctx.translate(x0+13,T+ph/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';
+  ctx.fillText('peak amplitude (log)',0,0);ctx.restore();
+
+  const reference=(exponent,color,label,labelY)=>{
+    ctx.strokeStyle=color;ctx.lineWidth=1.3;ctx.setLineDash([5,4]);ctx.beginPath();
+    ctx.moveTo(xOf(xLo),yOf(refAt(xLo,exponent)));
+    ctx.lineTo(xOf(xHi),yOf(refAt(xHi,exponent)));
+    ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=color;ctx.fillText(label,L+6,labelY);
+  };
+  // Legend sits low-left: the fitted line runs top-left to bottom-right, so
+  // that corner is the only part of the plot with nothing in it.
+  reference(-.5,'#ffc857','r ^ -0.50  2D spreading alone',T+ph-34);
+  reference(-1.5,'#c58cff','r ^ -1.50  spreading × free-surface ghost',T+ph-20);
+
+  ctx.strokeStyle='#7dff9b';ctx.lineWidth=1.6;ctx.beginPath();
+  ctx.moveTo(xOf(xLo),yOf(decay.intercept/Math.LN10+decay.exponent*xLo));
+  ctx.lineTo(xOf(xHi),yOf(decay.intercept/Math.LN10+decay.exponent*xHi));
+  ctx.stroke();
+  ctx.fillStyle='#7dff9b';ctx.fillText(`fitted r ^ ${decay.exponent.toFixed(2)}`,L+6,T+ph-6);
+
+  ctx.fillStyle='#7fd3ff';
+  decay.points.forEach((point,k)=>{
+    ctx.beginPath();ctx.arc(xOf(xs[k]),yOf(ys[k]),2.6,0,Math.PI*2);ctx.fill();
+  });
+  return decay;
+}
+
+/* RIGHT PLOT: mean trace RMS down the record, before and after gain, with the
+   fitted trend each one carries. */
+function drawRecordTrendPlot(ctx,x0,y0,w,h,shot){
+  const L=x0+54,R=14,T=y0+24,B=40,pw=w-(L-x0)-R,ph=h-(T-y0)-B;
+  const before=shotRmsProfile(shot,false),after=shotRmsProfile(shot,true);
+  const bins=before.length,record=shot.nt*shot.dt;
+  const FLOOR_DB=-72;
+  ctx.fillStyle='#8a949f';ctx.fillText('mean trace RMS down the record',L,y0+14);
+  /* Each curve is referenced to its OWN peak. The bins ahead of the first break
+     hold nothing but arithmetic dust, so referencing the first non-zero bin
+     would divide by a number near the float floor and report a decay of several
+     hundred decibels. */
+  const peakOf=curve=>{let m=0;for(let b=0;b<curve.length;b++)if(curve[b]>m)m=curve[b];return m;};
+  const beforeRef=peakOf(before),afterRef=peakOf(after);
+  if(!(beforeRef>0)){
+    ctx.fillStyle='#65717e';ctx.fillText('This shot recorded no energy.',L,T+20);
+    return null;
+  }
+  const dbOf=(value,ref)=>ref>0&&value>0?Math.max(FLOOR_DB,20*Math.log10(value/ref)):FLOOR_DB;
+  const beforeDb=Array.from(before,v=>dbOf(v,beforeRef));
+  const afterDb=Array.from(after,v=>dbOf(v,afterRef));
+  const lo=FLOOR_DB,hi=0;
+  const xOf=b=>L+b/Math.max(1,bins-1)*pw, yOf=db=>T+ph-(db-lo)/(hi-lo)*ph;
+
+  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
+  for(let db=hi;db>=lo;db-=12){
+    const y=yOf(db);
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText(`${db}`,x0+16,y+4);
+  }
+  for(let q=0;q<=4;q++){
+    const x=L+q/4*pw;
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    ctx.textAlign='center';ctx.fillText((q/4*record).toFixed(2),x,T+ph+16);ctx.textAlign='left';
+  }
+  ctx.fillStyle='#8a949f';ctx.textAlign='center';
+  ctx.fillText('two-way time (s)',L+pw/2,y0+h-6);ctx.textAlign='left';
+  ctx.save();ctx.translate(x0+13,T+ph/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';
+  ctx.fillText('dB below each curve’s own peak',0,0);ctx.restore();
+
+  const drawCurve=(values,color)=>{
+    ctx.strokeStyle=color;ctx.lineWidth=1.6;ctx.beginPath();
+    values.forEach((db,b)=>{const x=xOf(b),y=yOf(db);b?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.stroke();
+  };
+  drawCurve(beforeDb,'#7fd3ff');
+  if(gainMode!=='none')drawCurve(afterDb,'#7dff9b');
+
+  /* The reported statistic is the SLOPE from the first break onward, not the
+     drop from the peak: a record's loudest point is wherever the strongest
+     reflector happens to be -- around 0.6 s on the default model, not the first
+     arrival -- so a peak-to-end drop would measure only the tail of the record
+     and make a correct compensation look like it had done nothing. */
+  const firstBreakBin=curve=>{for(let b=0;b<curve.length;b++)if(curve[b]>FLOOR_DB+18)return b;return 0;};
+  const slopeOf=(curve)=>{
+    const from=firstBreakBin(curve);
+    let n=0,sx=0,sy=0,sxx=0,sxy=0;
+    for(let b=from;b<curve.length;b++){
+      const t=b/Math.max(1,curve.length-1)*record,y=curve[b];
+      n++;sx+=t;sy+=y;sxx+=t*t;sxy+=t*y;
+    }
+    const denom=n*sxx-sx*sx;
+    if(!(Math.abs(denom)>1e-12))return null;
+    return{from,slope:(n*sxy-sx*sy)/denom,intercept:(sy*sxx-sx*sxy)/denom};
+  };
+  const beforeFit=slopeOf(beforeDb),afterFit=slopeOf(afterDb);
+  const fit=gainMode==='none'?beforeFit:afterFit;
+  if(fit){
+    ctx.strokeStyle=gainMode==='none'?'rgba(127,211,255,.5)':'rgba(125,255,155,.5)';
+    ctx.lineWidth=1.4;ctx.setLineDash([5,4]);ctx.beginPath();
+    [fit.from,bins-1].forEach((b,k)=>{
+      const t=b/Math.max(1,bins-1)*record,y=yOf(Math.max(lo,Math.min(hi,fit.intercept+fit.slope*t)));
+      k?ctx.lineTo(xOf(b),y):ctx.moveTo(xOf(b),y);
+    });
+    ctx.stroke();ctx.setLineDash([]);
+  }
+  ctx.fillStyle='#7fd3ff';ctx.fillText('recorded',L+8,T+12);
+  if(gainMode!=='none'){ctx.fillStyle='#7dff9b';ctx.fillText('after gain',L+70,T+12);}
+  return{before:beforeFit?beforeFit.slope:null,after:afterFit?afterFit.slope:null};
+}
+
+function readGainControls(){
+  gainMode=pickFrom(document.getElementById('gainMode').value,GAIN_MODES,'none');
+  agcWindowMs=Math.max(20,Math.min(2000,+document.getElementById('agcWindow').value||250));
+  document.getElementById('agcWindowBox').style.display=gainMode==='agc'?'':'none';
+}
+function applyGainSettings(){
+  readGainControls();
+  rebuildFilteredDatabase(gainMode==='none'?'Amplitude recovery removed':`Amplitude recovery · ${gainModeLabel()}`);
+  drawGainPanel();
+  if(deconViewVisible())drawDeconPanel();
+}
+document.getElementById('gainMode').onchange=applyGainSettings;
+document.getElementById('agcWindow').onchange=()=>{if(gainMode==='agc')applyGainSettings();else readGainControls();};
+
+function gainViewVisible(){return document.getElementById('gainView').style.display!=='none';}
 function deconViewVisible(){return document.getElementById('deconView').style.display!=='none';}
 function readDeconControls(){
   deconMode=document.getElementById('deconMode').value==='spiking'?'spiking':'predictive';
@@ -4806,6 +5202,73 @@ function runNumericalChecks(){
   results.push({test:'deconvolution preserves the primary it cannot predict',
     pass:energyOf(revAfterTrace,primaryWindow)>.5*energyOf(reverb,primaryWindow)});
 
+
+  // --- amplitude recovery -------------------------------------------------
+  const gDt=.004,gN=500;
+  const decaying=new Float32Array(gN);
+  // 1/sqrt(t): exactly what 2D cylindrical spreading does to a wavefront.
+  for(let i=0;i<gN;i++)decaying[i]=1/Math.sqrt(Math.max(i,1)*gDt);
+  const savedMode=gainMode;
+  gainMode='spreading';
+  const sqrtScalars=gainScalars(decaying,null,gDt);
+  const recovered=applyGainScalars(decaying,sqrtScalars);
+  const flatness=arr=>{const a=Math.abs(arr[Math.round(arr.length*.15)]),b=Math.abs(arr[arr.length-1]);return b/Math.max(1e-12,a);};
+  results.push({test:'sqrt(t) gain flattens 2D cylindrical spreading',
+    pass:Math.abs(flatness(recovered)-1)<1e-6&&flatness(decaying)<.45});
+  // t over-corrects in 2D: the compensated trace must now GROW with time.
+  gainMode='linear';
+  const over=applyGainScalars(decaying,gainScalars(decaying,null,gDt));
+  results.push({test:'t gain over-corrects a 2D record',pass:flatness(over)>2});
+  // Gain is a per-sample multiplier shared by both components, so it cannot
+  // change the signal-to-noise ratio at any sample.
+  gainMode='spreading';
+  const gSignal=decaying,gNoise=new Float32Array(gN);
+  for(let i=0;i<gN;i++)gNoise[i]=.1;
+  const shared=gainScalars(gSignal,gNoise,gDt);
+  const gs=applyGainScalars(gSignal,shared),gn=applyGainScalars(gNoise,shared);
+  let snrHeld=true;
+  for(let i=1;i<gN;i++){
+    const before=Math.abs(gSignal[i])/Math.abs(gNoise[i]),after=Math.abs(gs[i])/Math.abs(gn[i]);
+    if(Math.abs(after-before)>1e-6*Math.max(1,before))snrHeld=false;
+  }
+  results.push({test:'gain leaves signal-to-noise unchanged at every sample',pass:snrHeld});
+  // AGC must flatten a decaying trace and must be derived from signal+noise, so
+  // that the two components still sum to the AGC of the recorded trace.
+  gainMode='agc';agcWindowMs=120;
+  const agcScalars=gainScalars(gSignal,gNoise,gDt);
+  const agcSignal=applyGainScalars(gSignal,agcScalars),agcNoise=applyGainScalars(gNoise,agcScalars);
+  const combinedBefore=new Float32Array(gN);
+  for(let i=0;i<gN;i++)combinedBefore[i]=gSignal[i]+gNoise[i];
+  const agcCombined=applyGainScalars(combinedBefore,agcScalars);
+  let partsSum=true;
+  for(let i=0;i<gN;i++)if(Math.abs(agcSignal[i]+agcNoise[i]-agcCombined[i])>1e-4*Math.max(1,Math.abs(agcCombined[i])))partsSum=false;
+  results.push({test:'AGC components still sum to the AGC of the whole record',pass:partsSum});
+  results.push({test:'AGC flattens a decaying trace harder than sqrt(t)',
+    pass:Math.abs(flatness(applyGainScalars(decaying,agcScalars))-1)<.15});
+  // A silent trace must not be handed an unbounded scalar.
+  const silent=new Float32Array(gN);
+  results.push({test:'AGC refuses a silent trace instead of dividing by zero',
+    pass:gainScalars(silent,null,gDt,'agc')===null});
+  gainMode=savedMode;
+
+  /* The spreading exponent is fitted in log-log, so a synthetic power law must
+     come back exactly. Guards the fit itself, independent of the simulation. */
+  const synth={traces:[],receivers:[],nt:400,dt:.002,sourceX:0,sourceI:Math.floor(MX/2)};
+  {
+    const v=datumVelocityAt(synth.sourceI),delay=sourceWaveletDelay();
+    for(let n=0;n<28;n++){
+      const offset=200+n*40,t=Math.round((offset/v+delay)/synth.dt);
+      const trace=new Float32Array(synth.nt);
+      if(t<synth.nt)trace[t]=Math.pow(offset,-1.5);          // exact r^-1.5
+      synth.traces.push(trace);
+      synth.receivers.push({id:n+1,i:0,j:SURF,x:synth.sourceX+offset});
+    }
+  }
+  const synthDecay=firstBreakDecay(synth);
+  results.push({test:'spreading exponent recovers a known power law',
+    pass:!!synthDecay&&Math.abs(synthDecay.exponent+1.5)<1e-6});
+  results.push({test:'near-offset traces are excluded from the spreading fit',
+    pass:!!synthDecay&&synthDecay.points.every(q=>q.offset>=synthDecay.minOffset)});
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

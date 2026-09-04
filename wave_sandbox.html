@@ -106,8 +106,7 @@
   .nmo-pane{min-width:0}.nmo-pane canvas{width:100%;height:auto;image-rendering:auto}.nmo-pane .hint{margin-top:4px}
   .nmo-pane{padding:4px;background:#11161d;border:1px solid #202832;border-radius:5px}
   .nmo-pane .ttl{margin:0 0 7px 2px}
-  .analysis-grid{display:grid;grid-template-columns:minmax(380px,1.3fr) minmax(280px,.95fr) minmax(280px,.95fr);gap:12px;margin:12px 0;align-items:start}
-  @media(max-width:1450px){.analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .analysis-grid{display:grid;grid-template-columns:minmax(420px,1.45fr) minmax(300px,1fr);gap:12px;margin:12px 0;align-items:start}
   .analysis-grid canvas{width:100%;height:auto}
   @media(max-width:1050px){.analysis-grid{grid-template-columns:1fr}}
   .progress{height:6px;background:#252c35;border-radius:4px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--acc)}
@@ -390,11 +389,6 @@
             <p class="ttl">Constant-velocity stacks</p>
             <canvas id="cvsCanvas" width="900" height="430" aria-label="Constant velocity stack panels"></canvas>
             <div class="hint" id="cvsInfo">Click a panel to pick that velocity at the current t₀.</div>
-          </div>
-          <div class="nmo-pane">
-            <p class="ttl">Amplitude versus angle (acoustic)</p>
-            <canvas id="avoCanvas" width="560" height="430" aria-label="Measured amplitude versus incidence angle against the acoustic Zoeppritz prediction"></canvas>
-            <div class="hint" id="avoInfo">Pick an event on the raw CMP to measure its amplitude against offset.</div>
           </div>
           <div class="nmo-pane">
             <p class="ttl">Dix interval velocities</p>
@@ -2604,175 +2598,6 @@ function drawConstantVelocityStacks(){
   ctx.fillText(`t₀ ${selectedHyperbolaT0.toFixed(2)} s`,L+pw-70,14);
 }
 
-/* ---------------- amplitude versus angle ---------------- */
-/* HONEST SCOPE. The solver is acoustic, so this is fluid-fluid AVO: the
-   reflection coefficient genuinely varies with angle, and the critical angle is
-   real and observable. What is NOT here is any shear response -- no Poisson
-   ratio, so none of the Class I-IV gas-sand behaviour that "AVO" usually means
-   in interpretation. The angle dependence below is exact for the medium being
-   modelled; it is simply a medium without shear.
-
-   Exact acoustic reflection coefficient at incidence angle t1, with the
-   transmission angle from Snell's law:
-       R = (Z2/cos t2 - Z1/cos t1) / (Z2/cos t2 + Z1/cos t1)
-   Past the critical angle (only when V2 > V1) cos t2 turns imaginary, the wave
-   is totally reflected, and |R| = 1. */
-function acousticReflectionCoefficient(theta1,v1,rho1,v2,rho2){
-  const s1=Math.sin(theta1),s2=s1*v2/v1;
-  if(Math.abs(s2)>=1)return{R:1,critical:true};
-  const c1=Math.cos(theta1),c2=Math.sqrt(1-s2*s2);
-  const a=v2*rho2/c2,b=v1*rho1/c1;
-  return{R:(a-b)/(a+b),critical:false};
-}
-function criticalAngleFor(v1,v2){return v2>v1?Math.asin(v1/v2):null;}
-
-/* Straight-ray angle estimate: with the RMS velocity giving an equivalent
-   depth, the half-offset and that depth define the incidence angle. Standard,
-   and adequate well past the offsets this survey reaches. */
-function incidenceAngleFor(offset,t0,velocityRms){
-  const physical=Math.max(1e-6,t0-sourceWaveletDelay());
-  const depth=velocityRms*physical/2;
-  return Math.atan(Math.abs(offset)/2/Math.max(1e-6,depth));
-}
-
-/* The interface the picked event belongs to, chosen as the model reflector
-   whose predicted time is nearest the pick. */
-function interfaceNearTime(midpointX,t0){
-  const segments=modelVerticalSegmentsAt(midpointX),delay=sourceWaveletDelay();
-  let t=delay,best=null;
-  for(let k=0;k<segments.length;k++){
-    t+=segments[k].intervalT;
-    const below=k+1<segments.length?segments[k+1]:{layerIndex:layers.length-1,velocity:layers[layers.length-1].vp};
-    const entry={time:t,above:segments[k],below,gap:Math.abs(t-t0)};
-    if(!best||entry.gap<best.gap)best=entry;
-  }
-  return best;
-}
-
-function avoObservations(){
-  const records=selectedCmpTraces();
-  if(!records.length||selectedCmpIndex===null)return null;
-  const midpointX=cmpOrigin+selectedCmpIndex*cmpBinSize,t0=selectedHyperbolaT0;
-  const velocity=vAt(t0,midpointX),reference=interfaceNearTime(midpointX,t0);
-  if(!(velocity>0)||!reference)return null;
-  const searchSeconds=.35/f0;
-  const points=[];
-  records.forEach(record=>{
-    const predicted=moveoutTime(t0,record.sourceReceiverOffset,velocity);
-    const centre=Math.round(predicted/record.dt),radius=Math.max(1,Math.round(searchSeconds/record.dt));
-    let best=-1,bestAbs=-1;
-    for(let a=Math.max(0,centre-radius);a<=Math.min(record.nt-1,centre+radius);a++){
-      const value=Math.abs(record.samples[a]);
-      if(value>bestAbs){bestAbs=value;best=a;}
-    }
-    if(best<0)return;
-    points.push({offset:Math.abs(record.sourceReceiverOffset),
-      angle:incidenceAngleFor(record.sourceReceiverOffset,t0,velocity),
-      amplitude:record.samples[best]});
-  });
-  if(points.length<3)return null;
-  points.sort((a,b)=>a.angle-b.angle);
-  const above=reference.above,below=reference.below;
-  const rho1=above.layerIndex<0?WATER_RHO:layers[above.layerIndex].rho;
-  const rho2=below.layerIndex<0?WATER_RHO:layers[below.layerIndex].rho;
-  return{points,t0,midpointX,velocity,
-    v1:above.velocity,rho1,v2:below.velocity,rho2,
-    interfaceTime:reference.time,
-    critical:criticalAngleFor(above.velocity,below.velocity)};
-}
-
-/* Round an axis limit up to a readable 1/2/5 x 10^n step so the gridline
-   labels stay legible whatever the normalisation happens to produce. */
-function niceCeiling(value){
-  if(!(value>0)||!isFinite(value))return 1;
-  const magnitude=Math.pow(10,Math.floor(Math.log10(value)));
-  const scaled=value/magnitude;
-  const step=scaled<=1?1:scaled<=2?2:scaled<=5?5:10;
-  return step*magnitude;
-}
-
-function drawAvoPanel(){
-  const cv=document.getElementById('avoCanvas');
-  if(!cv)return;
-  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height,info=document.getElementById('avoInfo');
-  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
-  const L=52,R=14,T=22,B=40,pw=W-L-R,ph=H-T-B;
-  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
-  const data=avoObservations();
-  if(!data){
-    ctx.fillStyle='#8a949f';ctx.fillText('Select a CMP and pick an event on the raw gather.',L,T+20);
-    info.textContent='Pick an event on the raw CMP to measure its amplitude against offset.';
-    return;
-  }
-  const maxAngle=Math.max(.18,Math.min(Math.PI/2*.98,Math.max(...data.points.map(p=>p.angle))*1.12));
-  const xOf=angle=>L+Math.max(0,Math.min(1,angle/maxAngle))*pw;
-  /* Measured and predicted are normalised to their own value at the smallest
-     available angle. Absolute amplitudes carry geometric spreading and
-     transmission loss through everything above, which the reflection
-     coefficient does not describe -- the comparable quantity is the TREND. */
-  const nearest=data.points[0];
-  const measuredReference=Math.abs(nearest.amplitude)||1;
-  const predictedAt=angle=>acousticReflectionCoefficient(angle,data.v1,data.rho1,data.v2,data.rho2);
-  const predictedReference=Math.abs(predictedAt(nearest.angle).R)||1;
-  /* Past the critical angle |R| saturates at 1, which normalised by a small
-     near-offset reflection coefficient can be several times the near-offset
-     value. A fixed ceiling would flat-line both curves against the top edge and
-     hide exactly the behaviour worth seeing, so the axis follows the data. */
-  const curveSamples=Array.from({length:161},(_,k)=>Math.abs(predictedAt(k/160*maxAngle).R)/predictedReference);
-  const measuredSamples=data.points.map(point=>Math.abs(point.amplitude)/measuredReference);
-  const yTop=niceCeiling(Math.max(1.2,...curveSamples,...measuredSamples)*1.08);
-  const yOf=value=>T+ph-Math.max(0,Math.min(yTop,value))/yTop*ph;
-
-  ctx.strokeStyle='#232a33';ctx.fillStyle='#65717e';
-  for(let q=0;q<=4;q++){
-    const value=q/4*yTop,y=yOf(value);
-    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
-    ctx.fillText(value.toFixed(value<10?1:0),12,y+3);
-  }
-  for(let deg=0;deg<=maxAngle*180/Math.PI;deg+=10){
-    const x=xOf(deg*Math.PI/180);
-    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
-    ctx.textAlign='center';ctx.fillText(String(deg),x,T+ph+14);ctx.textAlign='left';
-  }
-  ctx.fillStyle='#8a949f';ctx.textAlign='center';
-  ctx.fillText('incidence angle (degrees)',L+pw/2,H-6);ctx.textAlign='left';
-  ctx.save();ctx.translate(11,T+ph/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';
-  ctx.fillText('|amplitude| normalised at near offset',0,0);ctx.restore();
-
-  if(data.critical!==null&&data.critical<maxAngle){
-    const x=xOf(data.critical);
-    ctx.strokeStyle='rgba(255,107,107,.8)';ctx.setLineDash([4,3]);ctx.lineWidth=1.2;
-    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle='#ff6b6b';ctx.fillText('critical',x+3,T+11);
-  }
-
-  ctx.strokeStyle='#ffc857';ctx.lineWidth=1.6;ctx.beginPath();
-  for(let k=0;k<=160;k++){
-    const angle=k/160*maxAngle,value=Math.abs(predictedAt(angle).R)/predictedReference;
-    const x=xOf(angle),y=yOf(value);
-    k?ctx.lineTo(x,y):ctx.moveTo(x,y);
-  }
-  ctx.stroke();
-
-  ctx.fillStyle='#7fd3ff';
-  data.points.forEach(point=>{
-    const x=xOf(point.angle),y=yOf(Math.abs(point.amplitude)/measuredReference);
-    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
-  });
-
-  ctx.fillStyle='#ffc857';ctx.fillText('exact acoustic Zoeppritz',L+6,T+12);
-  ctx.fillStyle='#7fd3ff';ctx.fillText('measured',L+6,T+24);
-
-  const normalR=acousticReflectionCoefficient(0,data.v1,data.rho1,data.v2,data.rho2).R;
-  const widest=data.points[data.points.length-1];
-  const measuredTrend=Math.abs(widest.amplitude)/measuredReference;
-  const predictedTrend=Math.abs(predictedAt(widest.angle).R)/predictedReference;
-  info.innerHTML=`t₀ ${data.t0.toFixed(3)} s · interface ${data.v1.toFixed(0)}→${data.v2.toFixed(0)} m/s · R(0) ${normalR.toFixed(3)}`+
-    (data.critical!==null?` · critical ${(data.critical*180/Math.PI).toFixed(0)}°`:' · no critical angle (slower below)')+
-    `<br>at ${(widest.angle*180/Math.PI).toFixed(0)}°: measured ×${measuredTrend.toFixed(2)}, predicted ×${predictedTrend.toFixed(2)} of near-offset`+
-    `<br><span class="warning">Acoustic only — no shear, so no Poisson-driven Class I–IV response. Measured amplitudes also carry spreading and transmission loss, which R does not.</span>`;
-}
-
 /* ---------------- Dix inversion ---------------- */
 /* RMS (stacking) velocities describe the whole column above a reflector. The
    layer velocities are recovered between successive picks with Dix:
@@ -2933,7 +2758,7 @@ function drawNmo(){
   if(!records.length){
     [document.getElementById('nmoRaw'),document.getElementById('nmoCor'),document.getElementById('nmoStk')].forEach(cv=>drawTraceGather(cv,[],{empty:'Build and select a CMP'}));
     sc.fillStyle='#0b0e12';sc.fillRect(0,0,sembCan.width,sembCan.height);
-    drawConstantVelocityStacks();drawDixPanel();drawAvoPanel();
+    drawConstantVelocityStacks();drawDixPanel();
     document.getElementById('stackSnrInfo').textContent='live-fold mean';return;
   }
   ensureSemblance();drawSemb();
@@ -2959,7 +2784,7 @@ function drawNmo(){
     :'no multiples predicted here';
   const exactText=!showExactMoveout?'gold model curve off':modelHasLateralVariation()?'gold exact curve unavailable for laterally varying interfaces':'gold = exact layered-model reference';
   document.getElementById('hyperbolaInfo').innerHTML=`<span style="color:#ff6b6b">Red active NMO</span>: t₀ ${selectedHyperbolaT0.toFixed(3)} s · V<sub>NMO</sub> ${activeVelocity.toFixed(0)} m/s · ${velocitySourceLabel()}${snap}${residualText}<br>${hasZero?'zero-offset trace present':`nearest offset ±${nearest.toFixed(0)} m`} · source delay ${(sourceWaveletDelay()*1000).toFixed(0)} ms compensated · <span style="color:#ffc857">${exactText}</span><br><span style="color:#ff8fd0">${multipleText}</span>`;
-  drawConstantVelocityStacks();drawDixPanel();drawAvoPanel();
+  drawConstantVelocityStacks();drawDixPanel();
   const snr=stackSnrReport(),snrEl=document.getElementById('stackSnrInfo');
   snrEl.innerHTML=snr
     ?`SNR <b>${snr.traceSnr.toFixed(1)} dB</b> mean trace &rarr; <b>${snr.stackSnr.toFixed(1)} dB</b> stacked · gain <b>${snr.gain>=0?'+':''}${snr.gain.toFixed(1)} dB</b>`+
@@ -4981,26 +4806,6 @@ function runNumericalChecks(){
   results.push({test:'deconvolution preserves the primary it cannot predict',
     pass:energyOf(revAfterTrace,primaryWindow)>.5*energyOf(reverb,primaryWindow)});
 
-  // --- acoustic reflection coefficient ------------------------------------
-  const normal=acousticReflectionCoefficient(0,1500,1030,3000,2400).R;
-  const expectedNormal=(3000*2400-1500*1030)/(3000*2400+1500*1030);
-  results.push({test:'acoustic R at normal incidence matches the impedance form',
-    pass:Math.abs(normal-expectedNormal)<1e-12});
-  const critical=criticalAngleFor(1500,3000);
-  results.push({test:'total reflection past the critical angle',
-    pass:Math.abs(critical-Math.asin(.5))<1e-12
-      &&acousticReflectionCoefficient(critical+.05,1500,1030,3000,2400).critical===true
-      &&Math.abs(acousticReflectionCoefficient(critical+.05,1500,1030,3000,2400).R-1)<1e-12});
-  results.push({test:'no critical angle when the lower medium is slower',
-    pass:criticalAngleFor(3000,1500)===null});
-  // Angle must grow with offset and stay inside the first quadrant.
-  const angleNear=incidenceAngleFor(100,.5,2000),angleFar=incidenceAngleFor(1200,.5,2000);
-  results.push({test:'incidence angle grows with offset',
-    pass:angleFar>angleNear&&angleNear>0&&angleFar<Math.PI/2});
-  // The AVO axis must contain the data it is asked to show, at a round step.
-  results.push({test:'axis ceiling rounds up and never clips the data',
-    pass:niceCeiling(1.2)===2&&niceCeiling(3.4)===5&&niceCeiling(0.42)===0.5
-      &&[0.07,1,2.5,6,11,340].every(v=>niceCeiling(v)>=v)});
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

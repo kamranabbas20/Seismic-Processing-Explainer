@@ -1435,6 +1435,36 @@ function bandpassFilter(samples,dt,corners){
   return out;
 }
 
+/* Half-derivative, the "rho filter": multiply the spectrum by sqrt(-i*omega),
+   which is magnitude sqrt(|omega|) and a -45 degree phase rotation. Kirchhoff
+   summation in 2D reconstructs the section only up to this filter -- leaving it
+   out returns a smeared, low-frequency version of the image, because the
+   summation itself integrates rather than reproduces. */
+function rhoHalfDerivative(samples,dt){
+  const n=nextPow2(samples.length*2),re=new Float64Array(n),im=new Float64Array(n);
+  for(let i=0;i<samples.length;i++)re[i]=samples[i];
+  fftRadix2(re,im,false);
+  const half=n>>1,df=1/(n*dt);
+  for(let k=0;k<n;k++){
+    const f=k<=half?k*df:(k-n)*df;              // bins past n/2 are negative frequencies
+    const magnitude=Math.sqrt(2*Math.PI*Math.abs(f));
+    /* +pi/4, not -pi/4. fftRadix2's forward transform carries the opposite sign
+       convention to the one sqrt(-i*omega) is usually written against, and
+       taking the textbook sign here returns MINUS the half-derivative -- which
+       passes any magnitude check and silently inverts the polarity of the whole
+       migrated section. The self-test compares rho(rho(x)) against a signed
+       finite-difference derivative for exactly that reason. */
+    const phase=Math.PI/4*Math.sign(f);
+    const c=Math.cos(phase)*magnitude,sn=Math.sin(phase)*magnitude;
+    const r=re[k],i2=im[k];
+    re[k]=r*c-i2*sn;im[k]=r*sn+i2*c;
+  }
+  fftRadix2(re,im,true);
+  const out=new Float32Array(samples.length);
+  for(let i=0;i<samples.length;i++)out[i]=re[i];
+  return out;
+}
+
 /* ---------------- recorded noise ---------------- */
 /* Without noise the CMP method cannot justify itself: stacking exists to raise
    signal above what is NOT repeatable between traces, and clean synthetics have
@@ -3574,21 +3604,44 @@ function processAllCMPs(){
    lateral distance, so the migration, the NMO overlay and the semblance can
    never drift apart on the causal-wavelet delay convention.
 
-   Normalisation is a weighted mean rather than a raw sum. A raw sum focuses
-   more sharply but multiplies deep, flat-hyperbola samples by the whole
-   aperture while shallow, steeply-curved ones get only a few contributions,
-   which lights up the bottom of the section for a purely geometric reason.
-   The mean keeps the collapse (off-apex outputs average incoherent samples and
-   stay small) while remaining depth balanced.
-   Amplitude treatment is deliberately incomplete: obliquity is applied, the
-   sqrt(i.omega) rho filter and geometric spreading are not. Positions are
-   right, relative amplitudes only indicative. */
-function migrateSection(stacks,range,binSize,velocityAt,aperture,delay=sourceWaveletDelay()){
+   NORMALISATION IS A WEIGHTED SUM, NOT A MEAN. An earlier version divided by
+   the accumulated weight to keep the section "depth balanced", which is wrong
+   in a way that guts the image: a point diffractor has energy at every offset
+   along its curve, so averaging returns it intact, but a flat reflector only
+   meets the summation curve inside its Fresnel zone, so averaging divides it by
+   the whole aperture. Measured on a synthetic, that cost a flat reflector a
+   factor of nine while leaving a diffraction apex at 0.98 -- and a real section
+   is mostly reflectors, which is why the migrated anticline came back fainter
+   than the stack that fed it.
+
+   What makes the sum reproduce amplitudes instead of inflating them is the
+   pair of weights that belong to the operator: the rho filter (a half
+   derivative, applied once per input trace) and a 1/sqrt(v t) spreading term
+   alongside the obliquity. With those in place the constructive sum over the
+   Fresnel zone returns the reflector at its own amplitude rather than a
+   multiple of it.
+
+   Amplitude treatment is still incomplete -- no aperture taper, and the
+   velocity is the stacking velocity, so positions are meaningful and relative
+   amplitudes only indicative. */
+/* The one constant the weights above do not pin down, fixed by the standard
+   amplitude condition: a flat reflector must migrate to itself. It is a
+   constant and not a fudge -- sweeping the synthetic over t0 0.30-0.90 s,
+   velocity 1800-4000 m/s, bin 10-40 m, sample rate 1-4 ms and wavelet 18-45 Hz
+   moves the recovered amplitude only between 0.59 and 0.62, so exactly one
+   scalar was missing from the operator. */
+const MIGRATION_SCALE=0.814;
+
+function migrateSection(stacks,range,binSize,velocityAt,aperture,delay=sourceWaveletDelay(),minTime=1/Math.max(1,f0)){
   const out=new Map();
   if(!stacks||!stacks.size||!range)return out;
   const indices=[...stacks.keys()].sort((a,b)=>a-b);
   const reference=stacks.get(indices[0]).stack,nt=reference.nt,dt=reference.dt;
   const maxLag=Math.max(1,Math.round(aperture/Math.max(1e-9,binSize)));
+  // One half-derivative per input trace, reused by every output point that
+  // reads it, rather than once per summation step.
+  const filtered=new Map();
+  indices.forEach(index=>filtered.set(index,rhoHalfDerivative(stacks.get(index).stack.samples,dt)));
   for(const outIndex of indices){
     const source=stacks.get(outIndex),samples=new Float32Array(nt);
     for(let a=0;a<nt;a++){
@@ -3596,18 +3649,37 @@ function migrateSection(stacks,range,binSize,velocityAt,aperture,delay=sourceWav
       if(physicalT0<=0){samples[a]=source.stack.samples[a];continue;}
       const velocity=velocityAt(t0,outIndex);
       if(!(velocity>0))continue;
-      let sum=0,weight=0;
+      let sum=0;
       for(let lag=-maxLag;lag<=maxLag;lag++){
         const item=stacks.get(outIndex+lag);
         if(!item)continue;
+        const trace=filtered.get(outIndex+lag);
         const t=moveoutTime(t0,2*lag*binSize,velocity,delay);
         const f=t/item.stack.dt,i0=Math.floor(f);
         if(i0<0||i0+1>=item.stack.nt)continue;
-        const frac=f-i0,value=item.stack.samples[i0]*(1-frac)+item.stack.samples[i0+1]*frac;
-        const obliquity=physicalT0/Math.max(1e-9,t-delay);   // cos of the emergence angle
-        sum+=value*obliquity;weight+=obliquity;
+        const frac=f-i0,value=trace[i0]*(1-frac)+trace[i0+1]*frac;
+        const physicalT=t-delay;
+        if(physicalT<=0)continue;
+        const obliquity=physicalT0/physicalT;                  // cos of the emergence angle
+        /* 1/(v*sqrt(t)), not 1/sqrt(v*t). The classic 2D weight is
+           cos(theta)/sqrt(v*r) with r = v*t/2, which reduces to 1/(v*sqrt(t/2))
+           -- a further 1/sqrt(v) beyond the naive form. Sweeping the synthetic
+           over 1800, 2500 and 4000 m/s showed the naive form leaving a residual
+           that tracked sqrt(v) exactly (26.3 / 30.7 / 39.1), which is how the
+           missing factor was found. */
+        /* The traveltime in the spreading term is floored at one dominant
+           period. 1/(v*sqrt(t)) diverges as t goes to zero, and at zero lag,
+           where the obliquity is 1 and cannot damp it, the samples just below
+           the wavelet delay were amplified without bound: on the anticline the
+           shallowest time bin came out 340x brighter than the next one down,
+           which set the display normalisation and flattened the whole section
+           into grey. Ray-theoretic weights are not valid within a wavelength of
+           the source in any case, so the floor removes a singularity that never
+           described anything. */
+        const spreading=1/(velocity*Math.sqrt(Math.max(physicalT,minTime)));
+        sum+=value*obliquity*spreading;
       }
-      samples[a]=weight>0?sum/weight:0;
+      samples[a]=sum*binSize*MIGRATION_SCALE;
     }
     out.set(outIndex,{index:outIndex,center:source.center,fold:source.fold,stack:{samples,nt,dt}});
   }
@@ -5337,24 +5409,6 @@ function runNumericalChecks(){
   results.push({test:'Dix reports an unstable inversion instead of a wrong number',
     pass:dixBad.length===1&&!dixBad[0].stable&&dixBad[0].interval===null});
 
-  // --- post-stack migration ----------------------------------------------
-  // A section holding nothing but one diffraction hyperbola must collapse to
-  // its apex: the apex amplitude survives, the flank empties out.
-  const migBin=25,migNt=400,migDt=.002,migV=2500,migApex=10,migApexT0=.4,migDelay=sourceWaveletDelay();
-  const migStacks=new Map();
-  for(let k=0;k<=20;k++){
-    const samples=new Float32Array(migNt),arrival=moveoutTime(migApexT0,2*(k-migApex)*migBin,migV,migDelay);
-    for(let a=0;a<migNt;a++){const q=(a*migDt-arrival)/.008;samples[a]=Math.exp(-q*q);}
-    migStacks.set(k,{index:k,center:k*migBin,fold:10,stack:{samples,nt:migNt,dt:migDt}});
-  }
-  const peakOfColumn=(map,index)=>{const tr=map.get(index).stack.samples;let best=0;
-    for(let a=1;a<tr.length;a++)if(Math.abs(tr[a])>Math.abs(tr[best]))best=a;return{index:best,value:tr[best]};};
-  const flankBefore=peakOfColumn(migStacks,migApex+7).value;
-  const migrated=migrateSection(migStacks,{min:0,max:20},migBin,()=>migV,600,migDelay);
-  const apexAfter=peakOfColumn(migrated,migApex),flankAfter=peakOfColumn(migrated,migApex+7).value;
-  results.push({test:'migration collapses a diffraction to its apex',
-    pass:Math.abs(apexAfter.index*migDt-migApexT0)<=2*migDt&&apexAfter.value>.7&&Math.abs(flankAfter)<.25*Math.abs(flankBefore)});
-
   // --- streamer geometry --------------------------------------------------
   // Acquisition mode is derived, so the test drives its inputs instead.
   const savedGeometry=[environment,marineReceivers,streamerChannels,streamerSpacing,streamerNearOffset,streamerSide];
@@ -5672,6 +5726,67 @@ function runNumericalChecks(){
       &&/between/.test(spreadingComment(-0.6))
       &&/not a spreading law/.test(spreadingComment(0.40))
       &&/not a spreading law/.test(spreadingComment(-0.1))});
+
+  // --- migration ----------------------------------------------------------
+  /* Applying the half-derivative twice must give the first derivative, since
+     sqrt(-i*w) squared is -i*w. This checks the filter independently of the
+     summation that uses it. */
+  {
+    const mDt=.002,mN=512,sig=new Float32Array(mN);
+    for(let i=0;i<mN;i++){const a=Math.PI*25*((i-mN/2)*mDt),a2=a*a;sig[i]=(1-2*a2)*Math.exp(-a2);}
+    const twice=rhoHalfDerivative(rhoHalfDerivative(sig,mDt),mDt);
+    let num=0,den=0;
+    for(let i=mN/2-60;i<mN/2+60;i++){
+      const derivative=(sig[i+1]-sig[i-1])/(2*mDt);
+      num+=(twice[i]-derivative)*(twice[i]-derivative);den+=derivative*derivative;
+    }
+    /* 6%, not 2%. The reference here is a central difference, which is itself
+       low by (w*dt)^2/6 -- about 1.7% for a 25 Hz wavelet at 2 ms -- so a
+       tighter bound would be testing the reference rather than the filter. The
+       signed comparison is the point: the textbook phase sign returns MINUS the
+       half-derivative, which every magnitude check passes. */
+    results.push({test:'rho filter applied twice is the first derivative',
+      pass:den>0&&Math.sqrt(num/den)<.06});
+  }
+  /* The two properties migration must have, on a synthetic section: a flat
+     reflector comes back at its own amplitude, and a point diffractor collapses
+     to its apex. The first is what the earlier mean-normalised version got
+     wrong -- it returned a flat reflector at a ninth of its amplitude while
+     leaving a diffraction apex untouched, so a section of reflectors came back
+     fainter than the stack that fed it. */
+  {
+    const NB=61,MDT=.002,MNT=500,BIN=20,V=2500,T0=.5,delay=sourceWaveletDelay();
+    const wv=k=>{const a=Math.PI*30*(k*MDT),a2=a*a;return (1-2*a2)*Math.exp(-a2);};
+    const blank=()=>{const m=new Map();
+      for(let i=0;i<NB;i++)m.set(i,{index:i,center:i*BIN,fold:20,stack:{samples:new Float32Array(MNT),nt:MNT,dt:MDT}});
+      return m;};
+    const peakNear=(m,i,t)=>{const s=m.get(i).stack.samples,c=Math.round(t/MDT);let mx=0;
+      for(let k=-16;k<=16;k++)if(c+k>=0&&c+k<MNT)mx=Math.max(mx,Math.abs(s[c+k]));return mx;};
+    const flat=blank(),a0=Math.round(T0/MDT);
+    flat.forEach(item=>{for(let k=-12;k<=12;k++)item.stack.samples[a0+k]+=wv(k);});
+    const flatMig=migrateSection(flat,{min:0,max:NB-1},BIN,()=>V,800,delay);
+    const flatRatio=peakNear(flatMig,30,T0)/Math.max(1e-30,peakNear(flat,30,T0));
+    results.push({test:'migration returns a flat reflector at its own amplitude',
+      pass:flatRatio>.8&&flatRatio<1.25});
+    const diff=blank(),apex=30;
+    diff.forEach((item,i)=>{
+      const a=Math.round(moveoutTime(T0,2*(i-apex)*BIN,V,delay)/MDT);
+      for(let k=-12;k<=12;k++)if(a+k>=0&&a+k<MNT)item.stack.samples[a+k]+=wv(k);
+    });
+    const diffMig=migrateSection(diff,{min:0,max:NB-1},BIN,()=>V,800,delay);
+    const atApex=peakNear(diffMig,apex,T0),offApex=peakNear(diffMig,apex-15,T0);
+    /* The apex must also land at the right TIME, not merely be bright. Three
+       samples of slack, because the rho filter rotates the wavelet by 45
+       degrees and that moves its peak: the migrated apex sits at 0.496 s
+       against an input peak at 0.500 s. The shift is the operator's phase, not
+       a positioning error, and it is far inside the 33 ms wavelet period. */
+    const apexTrace=diffMig.get(apex).stack.samples;
+    let apexSample=0;
+    for(let a=1;a<MNT;a++)if(Math.abs(apexTrace[a])>Math.abs(apexTrace[apexSample]))apexSample=a;
+    results.push({test:'migration collapses a diffraction to its apex',
+      pass:atApex>3*peakNear(diff,apex,T0)&&atApex>20*offApex
+        &&Math.abs(apexSample*MDT-T0)<=3.01*MDT});
+  }
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

@@ -4678,6 +4678,23 @@ function firstBreakDecay(shot){
   return{points,exponent,intercept,velocity,minOffset};
 }
 
+/* What the fitted exponent means, decided from the number rather than assumed.
+   On a flat model the window holds a clean direct wave and the exponent lands
+   near -1.5. On a model with shallow structure it need not: a crest at 120 m
+   puts its own reflection inside the +/-1/f0 window from about 240 m offset, and
+   the head wave from the layer beneath overtakes the direct wave at around
+   565 m, so the fit stops describing geometric spreading at all and can even
+   come out positive. Saying "steeper than r^-0.50" regardless would be a claim
+   the panel's own measurement contradicts. */
+function spreadingComment(exponent){
+  const depth=(SURF*DX).toFixed(0);
+  if(exponent<=-0.9)
+    return ` — steeper than the r<sup>−0.50</sup> of 2D spreading alone, because source and receivers are ${depth} m under a free surface and their ghosts cancel harder with offset (two-path superposition predicts r<sup>−1.50</sup>).`;
+  if(exponent<=-0.2)
+    return ` — between the r<sup>−0.50</sup> of 2D spreading alone and the r<sup>−1.50</sup> that the free-surface ghost adds, so the window is holding a direct wave that something else is already interfering with.`;
+  return ` — which is not a spreading law: amplitude is flat or rising with offset, so the window is no longer measuring the direct wave. On a model with shallow structure a crest reflection falls inside the window at moderate offset, and the head wave from the layer below overtakes the direct arrival further out. Read the exponent on a flat model; here the reference slopes are drawn for comparison only.`;
+}
+
 function drawGainPanel(){
   const cv=document.getElementById('gainCanvas');
   if(!cv)return;
@@ -4699,7 +4716,7 @@ function drawGainPanel(){
   const rate=f=>f?`${f>0?'+':''}${f.toFixed(0)} dB/s`:'—';
   info.innerHTML=`Shot S${shot.id} · ${shot.traces.length} traces · record ${(shot.nt*shot.dt).toFixed(2)} s`+
     (decay?`<br>first arrivals fall as <b>r<sup>${decay.exponent.toFixed(2)}</sup></b> over ${decay.points[0].offset.toFixed(0)}–${decay.points[decay.points.length-1].offset.toFixed(0)} m`+
-      ` — steeper than the r<sup>−0.50</sup> of 2D spreading alone, because source and receivers are ${(SURF*DX).toFixed(0)} m under a free surface and their ghosts cancel harder with offset (two-path superposition predicts r<sup>−1.50</sup>).`
+      spreadingComment(decay.exponent)
       :'<br>not enough usable offsets to measure the spreading law.')+
     `<br>record trend ${rate(trend&&trend.before)}`+
     (gainMode==='none'?' · no recovery applied'
@@ -5648,6 +5665,13 @@ function runNumericalChecks(){
     results.push({test:'demultiple is a pass-through when it is off',pass:demultipleIfEnabled(token)===token});
     radonEnabled=savedEnabled;
   }
+
+  // The spreading commentary must follow the measurement, not assume it.
+  results.push({test:'spreading commentary tracks the measured exponent',
+    pass:/steeper than/.test(spreadingComment(-1.55))
+      &&/between/.test(spreadingComment(-0.6))
+      &&/not a spreading law/.test(spreadingComment(0.40))
+      &&/not a spreading law/.test(spreadingComment(-0.1))});
 
   const failures=results.filter(r=>!r.pass);
   lastSelfTest={total:results.length,passed:results.length-failures.length,failed:failures.length,failures:failures.map(r=>r.test)};

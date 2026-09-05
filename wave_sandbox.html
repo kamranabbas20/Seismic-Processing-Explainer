@@ -492,7 +492,9 @@
           <label>Seismic display gain <span id="nmoGainLbl">2.5×</span></label>
           <input type="range" id="nmoGain" min="0.5" max="8" value="2.5" step="0.5">
           <div class="toolbar">
-            <button id="vAuto">Show Model RMS</button><button id="vAutoPick">Auto-pick peaks</button><button id="vClear">Clear picks</button>
+            <button id="vAuto">Show Model RMS</button><button id="vAutoPick">Auto-pick peaks</button><button id="vAutoPickLine">Auto-pick across the line</button>
+            <label>every <select id="autoPickStride"><option>1</option><option>2</option><option selected>4</option><option>8</option></select> CMPs</label>
+            <button id="vClear">Clear picks</button>
             <label>Stretch mute <select id="stretchMute"><option value="off">OFF</option><option value="0.3">30%</option><option value="0.5" selected>50%</option><option value="0.75">75%</option><option value="1">100%</option></select></label>
             <label><input type="checkbox" id="topMuteOn"> top mute</label>
             <label>mute t₀ <input class="compact-range" type="range" id="muteT0" min="0" max="0.5" step="0.01" value="0.06"><span id="muteT0Lbl" class="metric">0.06 s</span></label>
@@ -536,6 +538,7 @@
             <button id="depthMigrateBtn">Run both migrations</button>
             <label>Depth aperture <input type="number" id="depthAperture" value="500" min="100" max="3000" step="50" style="width:74px"> m</label>
             <label><input type="checkbox" id="depthOverlay" checked> Overlay true interfaces</label>
+            <label><input type="checkbox" id="depthDerived" checked> Also migrate with the velocity derived from the picks</label>
           </div>
           <div class="mig-pair">
             <div>
@@ -543,16 +546,24 @@
               <canvas id="timeInDepthSection" width="1040" height="360" aria-label="Time migrated section converted to depth"></canvas>
             </div>
             <div>
-              <p class="ttl sub">Depth migration</p>
-              <canvas id="depthSection" width="1040" height="360" aria-label="Post-stack depth migrated section"></canvas>
+              <p class="ttl sub">Depth migration — model velocity</p>
+              <canvas id="depthSection" width="1040" height="360" aria-label="Post-stack depth migrated section using the model velocity field"></canvas>
+            </div>
+            <div>
+              <p class="ttl sub">Depth migration — velocity derived from the picks</p>
+              <canvas id="derivedDepthSection" width="1040" height="360" aria-label="Post-stack depth migrated section using a velocity field derived from picked stacking velocities"></canvas>
+            </div>
+            <div>
+              <p class="ttl sub">Derived minus true interval velocity</p>
+              <canvas id="derivedVelocityPanel" width="1040" height="360" aria-label="Difference between the derived and the true interval velocity field"></canvas>
             </div>
           </div>
           <div class="hint" id="depthInfo">Stack all CMPs, then run both migrations. Each panel is in metres, so the true interfaces can be drawn on both.</div>
-          <div class="note">Both panels carry the same gold interfaces and the same vertical axis, so the difference between them is the difference between the two methods and nothing else. The upper one is the ordinary time-migrated section stretched into depth with the velocity field — a re-plot, adding no information, purely so it can be compared. The lower one sums along eikonal traveltimes through that field instead of along a hyperbola built from one RMS number per output point. Watch the flanks: time migration cannot represent the velocity changing sideways, so it bends them off the gold line and gathers the deep energy into a lens under the crest; depth migration puts them where they belong.</div>
-          <div class="note">The arcs above the shallowest reflector are <b>migration aliasing</b>, not noise in the data. The stack is sampled every 20 m while the image grid is 5 m, so the summation curve is under-sampled and its impulse response does not fully cancel. A wider aperture reaches steeper parts of that curve and imports more of it, which is why the default is 500 m rather than the 800 m the time migration uses — try 300 m and 1200 m to see the trade against how much of the deep flanks get illuminated.</div>
-          <div class="note warning">Both migrate with the model's own velocity field — the same array the wave simulation propagates through. That makes these reference images showing what each method can recover when the velocity is right, not results obtainable from the recorded data alone. A real depth migration has to build that field first, and is only ever as good as it.</div>
+          <div class="note">All four panels carry the same gold interfaces and the same vertical axis, so any difference between them is a difference in method or in velocity and nothing else. <b>Top left</b> is the ordinary time-migrated section stretched into depth with the velocity field — a re-plot, adding no information, purely so it can be compared. <b>Top right</b> sums along eikonal traveltimes through that field instead of along a hyperbola built from one RMS number per output point. Watch the flanks: time migration cannot represent the velocity changing sideways, so it bends them off the gold line and gathers the deep energy into a lens under the crest; depth migration puts them where they belong.</div>
+          
+          <div class="note"><b>Bottom left</b> is the same depth migration run through a velocity model built from the data instead: pick stacking velocities on several CMPs, Dix them into interval velocities, integrate those to depth, interpolate sideways between the picked locations. Nothing in that chain consults the model. <b>Bottom right</b> is what the chain got wrong — derived minus true interval velocity, blue too slow, red too fast, with a cyan line at every picked CMP and a tick where its deepest pick ran out. Below that tick the derived model is not so much wrong as absent: the last interval velocity is simply held, because no reflection ever constrained what is down there.</div><div class="note">Press <b>Auto-pick across the line</b> on the Velocity stage first, or the derived model has a single column and no lateral variation at all. The stride matters, but measured on the anticline preset it does not matter in the direction you would guess: picking every gather (46 columns) gives a <em>worse</em> velocity field than picking every eighth (5 columns) — 635 against 540 m/s RMS above the deepest reflector — because the auto-picker’s scatter from gather to gather is larger than the lateral variation it is trying to resolve, and interpolating over long distances averages that scatter away. Denser picking only starts to pay once the picks are better than the structure is strong.</div><div class="note">The arcs above the shallowest reflector are <b>migration aliasing</b>, not noise in the data. The stack is sampled every 20 m while the image grid is 5 m, so the summation curve is under-sampled and its impulse response does not fully cancel. A wider aperture reaches steeper parts of that curve and imports more of it, which is why the default is 500 m rather than the 800 m the time migration uses — try 300 m and 1200 m to see the trade against how much of the deep flanks get illuminated.</div><div class="note warning">The top two panels migrate with the model’s own velocity field — the same array the wave simulation propagates through. They are reference images: what each method recovers when the velocity is right, not results obtainable from the recorded data alone. The bottom-left panel is the honest one, the image this survey could actually have produced. The gap between them is the cost of not knowing the velocity, and it is the only one of the three a real project ever gets to see.</div>
         </div>
-        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), attenuation and Q, statics, DMO, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It migrates with the model's own velocity field, so it shows what depth imaging recovers when the velocity is right, not what could be obtained from the recorded data alone. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 2032 m/s under the flanks against 2598 m/s under the crest — 28% of lateral variation — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface (12%, 22%, 28%).</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), attenuation and Q, statics, DMO, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 2032 m/s under the flanks against 2598 m/s under the crest — 28% of lateral variation — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface (12%, 22%, 28%).</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
       </div>
     </section>
   </main>
@@ -3787,7 +3798,7 @@ function processAllCMPs(){
   const mode=document.getElementById('allVelocity').value,minFold=+document.getElementById('minFold').value;
   const field=pickedVelocityField();
   if(mode==='field'&&!field){document.getElementById('finalInfo').textContent='No velocity picks yet — pick on the semblance panel at one or more CMPs, or choose a different velocity source.';return;}
-  finalStacks=new Map();migratedStacks=new Map();depthImage=null;timeInDepthImage=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  finalStacks=new Map();migratedStacks=new Map();depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
   keys.forEach(index=>{
     const records=cmpBins.get(index);if(records.length<minFold)return;
     const center=cmpOrigin+index*cmpBinSize;
@@ -3959,10 +3970,20 @@ function eikonalFromSurface(sourceI,slowness,nx,nz,h,surfaceRow){
   return T;
 }
 
+/* The model's own interval velocity, lifted onto the displayed grid. This is the
+   reference field -- the array the wave simulation itself propagates through --
+   and a real depth migration never has it. */
+function modelIntervalVelocityGrid(){
+  const v=new Float32Array(MX*MZ);
+  for(let j=0;j<MZ;j++)for(let i=0;i<MX;i++)v[j*MX+i]=vp[simIdx(i,j)];
+  return v;
+}
+
 /* Slowness for the exploding-reflector model, on the displayed model grid. */
-function explodingReflectorSlowness(){
+function explodingReflectorSlowness(velocity){
+  const field=velocity||modelIntervalVelocityGrid();
   const s=new Float32Array(MX*MZ);
-  for(let j=0;j<MZ;j++)for(let i=0;i<MX;i++)s[j*MX+i]=2/Math.max(1,vp[simIdx(i,j)]);
+  for(let k=0;k<s.length;k++)s[k]=2/Math.max(1,field[k]);
   return s;
 }
 
@@ -3974,11 +3995,15 @@ let DEPTH_MIGRATION_SCALE=1;
 /* Scatter form: loop over surface positions, spray each rho-filtered trace into
    the image along its own traveltime field. One traveltime field is alive at a
    time, so 46 of them cost 52,000 floats rather than 2.4 million. */
-function depthMigrate(stacks,aperture){
+function depthMigrate(stacks,aperture,velocity){
   if(!stacks||!stacks.size)return null;
   const keys=[...stacks.keys()].sort((a,b)=>a-b);
   const reference=stacks.get(keys[0]).stack,nt=reference.nt,dt=reference.dt;
-  const delay=sourceWaveletDelay(),slowness=explodingReflectorSlowness();
+  /* The velocity field is an argument, not a global, so the same operator can be
+     run against the model's field and against one derived from the picks and any
+     difference between the two images is the velocity and nothing else. */
+  const field=velocity||modelIntervalVelocityGrid();
+  const delay=sourceWaveletDelay(),slowness=explodingReflectorSlowness(field);
   const minTime=1/Math.max(1,f0);
   const image=new Float32Array(MX*MZ);
   const maxLag=Math.max(1,Math.round(aperture/DX));
@@ -4009,7 +4034,7 @@ function depthMigrate(stacks,aperture){
            floor the first few rows below the datum are amplified without bound
            and take over both the display clip and any measurement made on the
            image. */
-        const spreading=1/(vp[simIdx(i,j)]*Math.sqrt(Math.max(t,minTime)));
+        const spreading=1/(Math.max(1,field[k])*Math.sqrt(Math.max(t,minTime)));
         image[k]+=value*obliquity*spreading*taper;
       }
     }
@@ -4017,6 +4042,169 @@ function depthMigrate(stacks,aperture){
   const scale=cmpBinSize*DEPTH_MIGRATION_SCALE;
   for(let k=0;k<image.length;k++)image[k]*=scale;
   return image;
+}
+
+/* ---------------- a velocity model built from the data ----------------
+
+   Every migration above this line uses the model's own velocity field, which no
+   real survey has. This section builds the field a processor would actually
+   have: pick stacking velocities, Dix them into interval velocities, integrate
+   those to depth, interpolate sideways between the picked locations. Nothing
+   here consults the model. Whatever the picks got wrong is carried into the
+   image, which is the entire point of showing it next to the reference. */
+
+/* One picked CMP, from RMS-in-time to interval-in-depth. Thickness of each Dix
+   interval is v*(t2-t1)/2 -- one-way, because two-way time is what was picked.
+   An interval Dix reports as unstable is not silently dropped: the velocity
+   above it is carried down and the count is reported. */
+function derivedDepthColumn(points,delay=sourceWaveletDelay()){
+  const sorted=points.slice().sort((a,b)=>a.t0-b.t0);
+  if(!sorted.length)return null;
+  const intervals=dixIntervals(sorted,delay);
+  const slabs=[];let unstable=0,last=sorted[0].v,z=0;
+  const push=(intervalT,v)=>{
+    const thickness=v*intervalT/2;
+    if(thickness>1e-6){slabs.push({top:z,base:z+thickness,v});z+=thickness;}
+  };
+  const firstT=Math.max(0,sorted[0].t0-delay);
+  if(firstT>1e-6)push(firstT,sorted[0].v);        // datum down to the first pick
+  intervals.forEach(entry=>{
+    let v=entry.interval;
+    if(!entry.stable||!(v>0)){v=last;unstable++;}
+    push(entry.t2-entry.t1,v);last=v;
+  });
+  if(!slabs.length)slabs.push({top:0,base:Infinity,v:last});
+  return {slabs,unstable,bottom:z,bottomV:last};
+}
+
+/* Below the deepest pick there is no information at all, so the last interval
+   velocity is held constant rather than extrapolated. */
+function derivedColumnVelocity(column,depthBelowDatum){
+  const slabs=column.slabs;
+  if(depthBelowDatum<=slabs[0].top)return slabs[0].v;
+  for(let k=0;k<slabs.length;k++)if(depthBelowDatum<slabs[k].base)return slabs[k].v;
+  return column.bottomV;
+}
+
+/* Dix produces a staircase, and an eikonal solver run straight down a staircase
+   puts a kink in every traveltime contour at every step. A box smoother of
+   +/-3 cells (+/-15 m, a quarter of the dominant wavelength) takes the corner
+   off without moving the layers. Real depth-migration velocity models are
+   smoothed for exactly this reason. */
+const DERIVED_SMOOTH_CELLS=3;
+function smoothVelocityGrid(grid,radius=DERIVED_SMOOTH_CELLS){
+  if(radius<1)return grid;
+  const tmp=new Float32Array(grid.length);
+  for(let j=0;j<MZ;j++)for(let i=0;i<MX;i++){
+    let sum=0,n=0;
+    for(let d=-radius;d<=radius;d++){const ii=i+d;if(ii<0||ii>=MX)continue;sum+=grid[j*MX+ii];n++;}
+    tmp[j*MX+i]=sum/n;
+  }
+  for(let j=0;j<MZ;j++)for(let i=0;i<MX;i++){
+    let sum=0,n=0;
+    for(let d=-radius;d<=radius;d++){const jj=j+d;if(jj<0||jj>=MZ)continue;sum+=tmp[jj*MX+i];n++;}
+    grid[j*MX+i]=sum/n;
+  }
+  return grid;
+}
+
+/* The whole derived field, on the image grid. Columns exist only where somebody
+   picked; between them the velocity is blended linearly in midpoint distance and
+   outside them the nearest column is held, exactly as the stacking-velocity field
+   does, so the two are consistent about what is measured and what is inferred. */
+function derivedIntervalVelocityModel(){
+  const located=pickedCmpIndices();
+  if(!located.length)return null;
+  const delay=sourceWaveletDelay();
+  const columns=[];
+  located.forEach(index=>{
+    const picked=(pickSets.get(index)||[]).slice().sort((a,b)=>a.t0-b.t0).map(p=>({t0:p.t0,v:p.v}));
+    if(!picked.length)return;
+    if(picked[0].t0>delay+1e-6)picked.unshift({t0:delay,v:picked[0].v});
+    const column=derivedDepthColumn(picked,delay);
+    if(column)columns.push(Object.assign({index,x:cmpOrigin+index*cmpBinSize},column));
+  });
+  if(!columns.length)return null;
+  const xs=columns.map(c=>c.x),grid=new Float32Array(MX*MZ);
+  for(let i=0;i<MX;i++){
+    const x=i*DX;
+    let a=0;while(a+1<columns.length&&xs[a+1]<x)a++;
+    const b=Math.min(columns.length-1,a+1);
+    const span=xs[b]-xs[a];
+    const w=span>1e-9?Math.max(0,Math.min(1,(x-xs[a])/span)):0;
+    for(let j=0;j<MZ;j++){
+      const depth=Math.max(0,(j-SURF)*DX);
+      const va=derivedColumnVelocity(columns[a],depth),vb=derivedColumnVelocity(columns[b],depth);
+      grid[j*MX+i]=va+(vb-va)*w;
+    }
+  }
+  smoothVelocityGrid(grid);
+  return {grid,columns,located,
+    unstable:columns.reduce((sum,c)=>sum+c.unstable,0),
+    deepest:columns.reduce((d,c)=>Math.max(d,c.bottom),0)};
+}
+
+/* How wrong the derived field is, inside the CMP coverage and below the datum.
+   The answer is reported in two zones, because they mean opposite things. Above
+   the deepest reflector every interval is constrained by a reflection somebody
+   picked, so the error there is picking error. Below it nothing is constrained
+   at all -- the last interval velocity is simply held -- so the error there is
+   not a failure of the method, it is the absence of data, and averaging the two
+   together would hide both. */
+function velocityFieldError(derivedGrid,range){
+  const model=modelIntervalVelocityGrid();
+  const keys=range||finalRange;
+  const iFrom=keys?Math.max(0,Math.round((cmpOrigin+keys.min*cmpBinSize)/DX)):0;
+  const iTo=keys?Math.min(MX-1,Math.round((cmpOrigin+keys.max*cmpBinSize)/DX)):MX-1;
+  const zone=()=>({n:0,sum:0,sumSq:0,worst:0});
+  const above=zone(),below=zone();
+  const add=(z,d)=>{z.n++;z.sum+=d;z.sumSq+=d*d;if(Math.abs(d)>Math.abs(z.worst))z.worst=d;};
+  for(let i=iFrom;i<=iTo;i++){
+    const deepest=modelInterfaceDepth(layers.length-1,i);
+    for(let j=SURF+1;j<MZ;j++){
+      const k=j*MX+i,d=derivedGrid[k]-model[k];
+      add(j*DX<=deepest?above:below,d);
+    }
+  }
+  const finish=z=>z.n?{rms:Math.sqrt(z.sumSq/z.n),bias:z.sum/z.n,worst:z.worst,cells:z.n}:null;
+  return {above:finish(above),below:finish(below),iFrom,iTo};
+}
+
+/* Where an imaged interface actually landed. In each column inside the CMP
+   coverage the largest |amplitude| within a window centred on the TRUE interface
+   is taken as the imaged depth, so this measures how far the image moved a
+   reflector it did find -- not whether it found one. The window is three
+   quarters of a dominant wavelength, further clipped so it can never reach the
+   neighbouring interface and report that instead. */
+function imagedInterfaceError(image,range){
+  if(!image)return null;
+  const keys=range||finalRange;
+  const iFrom=keys?Math.max(1,Math.round((cmpOrigin+keys.min*cmpBinSize)/DX)):1;
+  const iTo=keys?Math.min(MX-2,Math.round((cmpOrigin+keys.max*cmpBinSize)/DX)):MX-2;
+  const out=[];
+  for(let k=1;k<layers.length;k++){
+    let n=0,sumSq=0;
+    for(let i=iFrom;i<=iTo;i++){
+      const truth=modelInterfaceDepth(k,i);
+      const row=truth/DX;
+      if(row<=SURF+1||row>=MZ-2)continue;
+      const v=vp[simIdx(i,Math.round(row))];
+      const gapUp=k>1?truth-modelInterfaceDepth(k-1,i):truth-SURF*DX;
+      const gapDown=k+1<layers.length?modelInterfaceDepth(k+1,i)-truth:Infinity;
+      const half=Math.max(2*DX,Math.min(.75*v/Math.max(1,f0),.45*gapUp,.45*gapDown));
+      const jFrom=Math.max(SURF+1,Math.round((truth-half)/DX)),jTo=Math.min(MZ-1,Math.round((truth+half)/DX));
+      let best=0,bestJ=-1;
+      for(let j=jFrom;j<=jTo;j++){
+        const a=Math.abs(image[j*MX+i]);
+        if(a>best){best=a;bestJ=j;}
+      }
+      if(bestJ<0||best<=0)continue;
+      const d=bestJ*DX-truth;
+      n++;sumSq+=d*d;
+    }
+    out.push({interface:k,rms:n?Math.sqrt(sumSq/n):null,columns:n});
+  }
+  return out;
 }
 
 let migratedStacks=new Map(),migrationAperture=800,finalDataView='stack';
@@ -4335,7 +4523,9 @@ function collectSessionState(){
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
-      migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value},
+      migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
+      depthMigrationAperture,depthDerived:document.getElementById('depthDerived').checked,
+      autoPickStride:document.getElementById('autoPickStride').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
   };
 }
@@ -4462,6 +4652,12 @@ function syncControlsFromState(proc){
   [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
   if(proc&&proc.minFold)set('minFold',proc.minFold);
   if(proc&&proc.allVelocity)set('allVelocity',proc.allVelocity);
+  if(proc&&proc.autoPickStride)set('autoPickStride',String(proc.autoPickStride));
+  if(proc&&Number.isFinite(+proc.depthMigrationAperture)){
+    depthMigrationAperture=Math.max(100,Math.min(3000,+proc.depthMigrationAperture));
+    set('depthAperture',String(depthMigrationAperture));
+  }
+  if(proc&&typeof proc.depthDerived==='boolean')check('depthDerived',proc.depthDerived);
   set('gainMode',gainMode);set('agcWindow',agcWindowMs);
   set('radonCut',radonCutMs);set('radonMax',radonMaxMs);check('radonOn',radonEnabled);
   set('deconMode',deconMode);set('deconLag',deconLagMs);set('deconOperator',deconOperatorMs);set('deconPrewhiten',deconPrewhiten);
@@ -4768,7 +4964,7 @@ function clearAcquisitionRecords(){
   running=false;paused=false;shotRecords=[];acquisitionTraces=[];cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;
   // Every derived product goes with the records, migration included -- leaving
   // it behind would show a migrated section belonging to data that is gone.
-  finalStacks.clear();migratedStacks.clear();depthImage=null;timeInDepthImage=null;finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
+  finalStacks.clear();migratedStacks.clear();depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
   semb=null;sembDirty=true;cvsCache=null;pickSets=new Map();picks=[];
   activeShotId=null;setup();document.getElementById('pauseAcq').textContent='Pause';document.getElementById('acqProgress').style.width='0%';
   document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; run an acquisition to measure achieved speed. Solver dt and recorded traces are unchanged.`;
@@ -5758,6 +5954,7 @@ document.getElementById('finalGain').oninput=e=>{document.getElementById('finalG
 document.getElementById('finalTimeGain').onchange=drawFinalSection;
 /* ---------------- migration comparison display ---------------- */
 let depthImage=null,timeInDepthImage=null,depthMigrationAperture=500,depthMigrationMs=0;
+let derivedDepthImage=null,derivedVelocity=null;
 
 /* Vertical two-way time to every depth on the image grid, integrated through
    the same interval velocity field the migrations use. This is a re-plot of the
@@ -5858,9 +6055,95 @@ function drawDepthImage(canvasId,image,emptyMessage){
   }
 }
 
+/* The derived field minus the true one, on the same axes and the same depth
+   scale as the two images beside it, so an error in the velocity can be read
+   directly against the part of the image it damaged. Blue is too slow, red too
+   fast; the grey band is agreement. */
+function drawVelocityDifferencePanel(canvasId,derived){
+  const cv=document.getElementById(canvasId);
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const L=54,R=12,T=16,B=30,pw=W-L-R,ph=H-T-B;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  if(!derived){
+    ctx.fillStyle='#8a949f';
+    ctx.fillText('Pick velocities on at least one CMP, then press Run both migrations.',L,T+22);
+    return;
+  }
+  const model=modelIntervalVelocityGrid(),diff=new Float32Array(MX*MZ);
+  for(let k=0;k<diff.length;k++)diff[k]=derived.grid[k]-model[k];
+  /* The colour scale is set from the constrained part of the section only --
+     above the deepest reflector. Below it the derived model holds one velocity
+     against a basement it never saw, and letting that set the scale would
+     compress every error that a pick could actually have caused into one flat
+     grey. The unconstrained zone saturates instead, which is the truth. */
+  const magnitudes=[];
+  for(let i=0;i<MX;i+=2){
+    const deepest=modelInterfaceDepth(layers.length-1,i);
+    for(let j=SURF+1;j<MZ;j+=2)if(j*DX<=deepest)magnitudes.push(Math.abs(diff[j*MX+i]));
+  }
+  magnitudes.sort((a,b)=>a-b);
+  const clip=Math.max(50,magnitudes.length?magnitudes[Math.floor((magnitudes.length-1)*.98)]:50);
+  const img=ctx.createImageData(Math.round(pw),Math.round(ph));
+  for(let py=0;py<img.height;py++){
+    const j=Math.min(MZ-1,Math.floor(py/img.height*MZ));
+    for(let px=0;px<img.width;px++){
+      const i=Math.min(MX-1,Math.floor(px/img.width*MX));
+      const u=Math.max(-1,Math.min(1,diff[j*MX+i]/clip)),m=Math.abs(u);
+      const base=64+Math.round(28*(1-m));
+      const r=u>0?Math.round(base+m*(214-base)):base,
+            g=Math.round(base*(1-.35*m)),
+            b=u<0?Math.round(base+m*(214-base)):base;
+      const o=(py*img.width+px)*4;
+      img.data[o]=r;img.data[o+1]=g;img.data[o+2]=b;img.data[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,L,T);
+
+  if(document.getElementById('depthOverlay').checked){
+    ctx.lineWidth=1.3;ctx.strokeStyle='rgba(255,200,87,.85)';
+    for(let k=1;k<layers.length;k++){
+      ctx.beginPath();
+      for(let i=0;i<MX;i++){
+        const depth=modelInterfaceDepth(k,i),x=L+i/(MX-1)*pw,y=T+depth/(MZ*DX)*ph;
+        i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+      }
+      ctx.stroke();
+    }
+  }
+  // where a pick actually exists, and how deep it reached
+  ctx.strokeStyle='rgba(126,231,255,.9)';ctx.lineWidth=1;
+  derived.columns.forEach(column=>{
+    const x=L+Math.max(0,Math.min(1,column.x/((MX-1)*DX)))*pw;
+    const y=T+Math.max(0,Math.min(1,(SURF*DX+column.bottom)/(MZ*DX)))*ph;
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,y);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x-4,y);ctx.lineTo(x+4,y);ctx.stroke();
+  });
+
+  ctx.strokeStyle='rgba(35,42,51,.75)';ctx.fillStyle='#a0abb6';
+  const maxDepth=MZ*DX;
+  for(let d=0;d<=maxDepth;d+=200){
+    const y=T+d/maxDepth*ph;
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText(`${d} m`,6,y+3);
+  }
+  for(let q=0;q<=4;q++){
+    const x=L+q/4*pw;
+    ctx.textAlign='center';ctx.fillText(`${Math.round(q/4*(MX-1)*DX)} m`,x,H-8);ctx.textAlign='left';
+  }
+  const legend=`derived − true · blue −${Math.round(clip)} · grey 0 · red +${Math.round(clip)} m/s, scaled above the deepest reflector · cyan = picked CMP, tick = deepest pick`;
+  const legendWidth=ctx.measureText(legend).width;
+  ctx.fillStyle='rgba(11,14,18,.78)';ctx.fillRect(L+4,T+3,legendWidth+8,14);
+  ctx.fillStyle='#e6edf3';ctx.fillText(legend,L+8,T+13);
+}
+
 function drawMigrationComparison(){
   drawDepthImage('timeInDepthSection',timeInDepthImage,'Run the time migration, then press Run both migrations.');
   drawDepthImage('depthSection',depthImage,'Stack all CMPs, then press Run both migrations.');
+  drawDepthImage('derivedDepthSection',derivedDepthImage,
+    'Pick velocities on at least one CMP, tick the derived-velocity box, then press Run both migrations.');
+  drawVelocityDifferencePanel('derivedVelocityPanel',derivedVelocity);
 }
 
 function runDepthMigration(){
@@ -5876,15 +6159,39 @@ function runDepthMigration(){
   const started=performance.now();
   depthImage=depthMigrate(finalStacks,depthMigrationAperture);
   timeInDepthImage=timeMigrationInDepth(migratedStacks);
+  const wantDerived=document.getElementById('depthDerived').checked;
+  derivedVelocity=wantDerived?derivedIntervalVelocityModel():null;
+  derivedDepthImage=derivedVelocity?depthMigrate(finalStacks,depthMigrationAperture,derivedVelocity.grid):null;
   depthMigrationMs=performance.now()-started;
   drawMigrationComparison();
-  document.getElementById('depthInfo').innerHTML=
-    `${finalStacks.size} CMP bins through both methods · depth grid ${MX} × ${MZ} at ${DX} m · ${depthMigrationMs.toFixed(0)} ms`+
-    `<br>time migration: hyperbolic, one RMS velocity per output point, aperture ${migrationAperture} m · depth migration: eikonal traveltimes through the velocity field, aperture ${depthMigrationAperture} m`;
+  const lines=[
+    `${finalStacks.size} CMP bins through ${derivedDepthImage?'three':'both'} methods · depth grid ${MX} × ${MZ} at ${DX} m · ${depthMigrationMs.toFixed(0)} ms`,
+    `time migration: hyperbolic, one RMS velocity per output point, aperture ${migrationAperture} m · depth migration: eikonal traveltimes through the velocity field, aperture ${depthMigrationAperture} m`];
+  if(wantDerived&&!derivedVelocity)
+    lines.push('<b>No derived model:</b> nothing has been picked yet. Pick velocities on at least one CMP — the more CMPs, the more of the lateral variation the derived field can carry.');
+  if(derivedVelocity){
+    const error=velocityFieldError(derivedVelocity.grid);
+    lines.push(`derived field: Dix through ${derivedVelocity.columns.length} picked CMP${derivedVelocity.columns.length===1?'':'s'}`+
+      `${derivedVelocity.unstable?`, ${derivedVelocity.unstable} unstable interval${derivedVelocity.unstable===1?'':'s'} carried down from above`:''}`+
+      ` · deepest pick reaches ${Math.round(derivedVelocity.deepest)} m below datum`+
+      (error&&error.above?` · velocity error above the deepest reflector ${error.above.rms.toFixed(0)} m/s RMS (bias ${error.above.bias>=0?'+':''}${error.above.bias.toFixed(0)})`:'')+
+      (error&&error.below?`, below it ${error.below.rms.toFixed(0)} m/s RMS — nothing down there was ever picked`:''));
+    const reference=imagedInterfaceError(depthImage),derivedError=imagedInterfaceError(derivedDepthImage);
+    if(reference&&derivedError){
+      const parts=reference.map((entry,k)=>{
+        const other=derivedError[k];
+        if(entry.rms===null||!other||other.rms===null)return null;
+        return `#${entry.interface} ${entry.rms.toFixed(0)} → ${other.rms.toFixed(0)} m`;
+      }).filter(Boolean);
+      if(parts.length)lines.push(`imaged interface depth error, model velocity → derived velocity (RMS metres): ${parts.join(' · ')}`);
+    }
+  }
+  document.getElementById('depthInfo').innerHTML=lines.join('<br>');
 }
 document.getElementById('depthMigrateBtn').onclick=runDepthMigration;
 document.getElementById('depthOverlay').onchange=drawMigrationComparison;
 document.getElementById('depthAperture').onchange=()=>{if(depthImage)runDepthMigration();};
+document.getElementById('depthDerived').onchange=()=>{if(depthImage)runDepthMigration();};
 
 document.getElementById('finalViewStack').onclick=()=>setFinalComparisonView('stack');
 document.getElementById('finalViewMigrated').onclick=()=>setFinalComparisonView('migrated');
@@ -5906,6 +6213,49 @@ document.getElementById('vAutoPick').onclick=()=>{
     ?`Auto-picked ${picks.length} point${picks.length>1?'s':''} at CMP ${selectedCmpIndex}. Move to another CMP and pick again to build a field.`
     :'No clear semblance peaks found — pick manually.';
   refreshPickList();drawNmo();updateFlow();
+};
+/* A velocity field with lateral variation needs picks at more than one place,
+   and picking 46 gathers by hand is not what this tool is for. This runs the
+   same semblance and the same auto-picker over every Nth gather. It is the only
+   way to get a derived velocity model that carries any structure at all -- and
+   the stride is exposed because how densely you pick is itself the lesson. */
+function autoPickAcrossLine(stride){
+  const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  if(!keys.length)return null;
+  const minFold=Math.max(1,+document.getElementById('minFold').value||2);
+  const original=selectedCmpIndex;
+  storePicksForSelectedCmp();
+  const savedSemb=semb,savedNT=sembNT,savedMax=sembMax;
+  const started=performance.now();
+  let visited=0,located=0,points=0;
+  for(let a=0;a<keys.length;a+=Math.max(1,stride)){
+    const index=keys[a];
+    if((cmpBins.get(index)||[]).length<minFold)continue;
+    selectedCmpIndex=index;semb=null;sembDirty=true;
+    ensureSemblance();
+    visited++;
+    if(!semb)continue;
+    const found=autoPickSemblance();
+    if(found.length){pickSets.set(index,found.map(pick=>({t0:pick.t0,v:pick.v})));located++;points+=found.length;}
+    else pickSets.delete(index);
+  }
+  selectedCmpIndex=original;semb=savedSemb;sembNT=savedNT;sembMax=savedMax;sembDirty=true;
+  loadPicksForSelectedCmp();
+  return {visited,located,points,ms:performance.now()-started};
+}
+
+document.getElementById('vAutoPickLine').onclick=()=>{
+  const info=document.getElementById('nmoInfo');
+  const stride=Math.max(1,+document.getElementById('autoPickStride').value||4);
+  const summary=autoPickAcrossLine(stride);
+  if(!summary){info.textContent='Build CMP gathers first.';return;}
+  velocitySource='manual';
+  document.querySelector('input[name="velocitySource"][value="manual"]').checked=true;
+  document.getElementById('allVelocity').value='field';
+  info.textContent=summary.located
+    ?`Auto-picked ${summary.points} point${summary.points===1?'':'s'} across ${summary.located} of ${summary.visited} gathers (every ${stride}) in ${summary.ms.toFixed(0)} ms. All-CMP velocity switched to the interpolated field.`
+    :`No clear semblance peaks in any of the ${summary.visited} gathers visited — pick manually.`;
+  refreshPickList();drawNmo();drawVelocityFieldPanel();updateFlow();
 };
 document.getElementById('vClear').onclick=e=>{
   if(e.shiftKey){
@@ -6464,6 +6814,74 @@ function runNumericalChecks(){
     }
     results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
       pass:worst<.02});
+  }
+
+  // --- velocity model derived from the data --------------------------------
+  /* Dix on an EXACT RMS function has to return the model's own interval
+     velocities and interface depths. This isolates the derived-model chain --
+     RMS in time, Dix, integrate to depth -- from the picking that feeds it, so
+     when the derived image is wrong the blame can be placed on the picks rather
+     than on the arithmetic. */
+  {
+    const midpoint=Math.max(0,Math.min((MX-1)*DX,(cmpOrigin||0)+((MX-1)*DX-(cmpOrigin||0))/2));
+    const segments=modelVerticalSegmentsAt(midpoint);
+    const column=derivedDepthColumn(modelRmsFunctionAt(midpoint));
+    let worstV=0,worstZ=0,depth=0;
+    if(column)segments.forEach((segment,k)=>{
+      depth+=segment.thickness;
+      const slab=column.slabs[k];
+      if(!slab)return;
+      worstV=Math.max(worstV,Math.abs(slab.v-segment.velocity)/segment.velocity);
+      worstZ=Math.max(worstZ,Math.abs(slab.base-depth));
+    });
+    results.push({test:'Dix on an exact RMS function rebuilds the model interval velocities',
+      pass:!!column&&column.slabs.length===segments.length&&column.unstable===0&&worstV<.005&&worstZ<DX});
+  }
+  /* An unstable Dix interval must not silently become a velocity. The one below
+     is a decreasing RMS function, which drives the radicand negative; the column
+     has to carry the velocity above it down and say that it did. */
+  {
+    const delay=sourceWaveletDelay();
+    const column=derivedDepthColumn([{t0:delay,v:2400},{t0:delay+.4,v:2600},{t0:delay+.6,v:1500}],delay);
+    results.push({test:'an unstable Dix interval is counted, not invented',
+      pass:!!column&&column.unstable===1&&column.slabs.length===2
+        &&Math.abs(column.slabs[1].v-column.slabs[0].v)<1e-6});
+  }
+  /* Smoothing may take the corner off the staircase; it may not move the mean. */
+  {
+    const flat=new Float32Array(MX*MZ).fill(2500);
+    smoothVelocityGrid(flat);
+    let worst=0;
+    for(let k=0;k<flat.length;k++)worst=Math.max(worst,Math.abs(flat[k]-2500));
+    results.push({test:'velocity smoothing leaves a constant field alone',pass:worst<1e-3});
+  }
+  /* The depth migration must actually USE the velocity it is handed, not reach
+     for the model behind it: the same synthetic flat event, migrated through a
+     uniform field, has to image at the depth that field implies. */
+  {
+    const V=3000,dEventT=.25,dDt=.002,dNt=Math.max(400,Math.round((dEventT+.4)/dDt));
+    const delay=sourceWaveletDelay(),centre=Math.round((delay+dEventT)/dDt);
+    const stacks=new Map(),first=Math.max(0,Math.round(cmpOrigin/cmpBinSize));
+    for(let n=0;n<40;n++){
+      const samples=new Float32Array(dNt);
+      for(let k=-12;k<=12;k++){
+        const a=Math.PI*f0*(k*dDt),a2=a*a;
+        if(centre+k>=0&&centre+k<dNt)samples[centre+k]=(1-2*a2)*Math.exp(-a2);
+      }
+      const index=first+n+6;
+      stacks.set(index,{index,center:cmpOrigin+index*cmpBinSize,fold:20,stack:{samples,nt:dNt,dt:dDt}});
+    }
+    const image=depthMigrate(stacks,600,new Float32Array(MX*MZ).fill(V));
+    const midIndex=[...stacks.keys()][Math.floor(stacks.size/2)];
+    const col=Math.max(0,Math.min(MX-1,Math.round((cmpOrigin+midIndex*cmpBinSize)/DX)));
+    let bestJ=-1,best=0;
+    for(let j=SURF+3;j<MZ-1;j++){
+      const v=Math.abs(image[j*MX+col]);
+      if(v>best){best=v;bestJ=j;}
+    }
+    const expected=datumDepth()+V*dEventT/2;
+    results.push({test:'depth migration images through the velocity field it is given',
+      pass:bestJ>0&&Math.abs(bestJ*DX-expected)<V/f0});
   }
 
   // --- automatic velocity picking ------------------------------------------

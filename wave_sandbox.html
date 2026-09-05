@@ -55,7 +55,22 @@
   .main-tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
   .stage{display:none;min-width:0}.stage.on{display:block}
   main{min-width:0}.stage canvas{max-width:100%;height:auto}
-  .stage-grid{display:grid;grid-template-columns:minmax(620px,1.15fr) minmax(660px,1fr);gap:12px;align-items:start}
+  /* minmax(0,…) rather than a fixed pixel minimum in every multi-column grid
+     below. A fixed track minimum is a floor the grid overflows rather than goes
+     under, and the media queries that drop these to fewer columns key off the
+     VIEWPORT while the space they actually have is the viewport minus the
+     parameter panel -- which the user can drag to 560 px. On a 1280 px screen
+     with the panel widened, the CMP layout's 420+280 floor exceeded the main
+     area and pushed the whole page into sideways scrolling; at 1500 px the NMO
+     grid's four floors overflowed by 286 px.
+
+     min(Npx,100%) does not fix this. That guards a SINGLE track against a
+     container narrower than itself, and here every individual floor fits while
+     their SUM does not. Zero minimums let the tracks share whatever width there
+     is in the fr ratios, which is what the ratios were for; the canvases are
+     already width:100%, so a narrower column simply draws a smaller picture
+     instead of pushing the page sideways. */
+  .stage-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:12px;align-items:start}
   .model-panel,.active-gather-panel{min-width:0}
   .model-panel #model,.model-panel #acqSchematic{width:100%;height:auto}
   .model-edit-wrap{position:relative;width:100%}
@@ -81,7 +96,12 @@
   .view-switch button{border:0;border-right:1px solid var(--line);border-radius:0}
   .view-switch button:last-child{border-right:0}
   .view-badge{display:inline-block;padding:2px 7px;border-radius:999px;background:#202832;color:var(--gold);font-size:11px;letter-spacing:.05em}
-  select{background:#0e1116;color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:5px;font:inherit}
+  /* min-width:0 matters: these sit inside `label{display:flex}`, and a flex item
+     refuses to shrink below its content width unless told it may. Without it a
+     select is as wide as its longest option, so "Free surface (multiples)"
+     pushed the surface-boundary control 18 px out of a 230 px panel. */
+  select{background:#0e1116;color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:5px;font:inherit;min-width:0;max-width:100%}
+  label>select{flex:0 1 auto}
   .wide{width:100%}.scroll-row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px}
   .shot-card{min-width:190px;padding:7px;background:#11161d;border:1px solid var(--line);border-radius:6px;cursor:pointer}
   .shot-card.on{border-color:var(--acc)}.shot-card h3{font-size:12px;margin:0 0 4px;font-weight:600}
@@ -92,7 +112,7 @@
   .metric{color:var(--txt)}.warning{color:var(--warn)}.gold{color:var(--gold)}
   .note{padding:8px 10px;background:#11161d;border-left:3px solid var(--acc);margin:8px 0;color:var(--dim)}
   details{margin-top:8px;color:var(--dim)}summary{cursor:pointer;color:var(--txt)}
-  .cmp-layout{display:grid;grid-template-columns:minmax(420px,1.2fr) minmax(280px,.8fr);gap:12px;align-items:start}
+  .cmp-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:12px;align-items:start}
   .scheme-legend{display:flex;gap:14px;flex-wrap:wrap;margin:7px 0;color:var(--dim);font-size:12px}
   .scheme-legend span{display:flex;align-items:center;gap:5px}.legend-mark{display:inline-block;width:12px;height:12px}
   .legend-source{color:#ff6b6b}.legend-receiver{color:#7fd3ff}.legend-midpoint{background:var(--gold);border-radius:50%}.legend-bin{background:rgba(255,200,87,.24);border:1px solid var(--gold)}
@@ -102,11 +122,11 @@
   .nmo-cmp-legend{display:flex;gap:15px;align-items:center;flex-wrap:wrap;margin-top:5px;color:var(--dim);font-size:11px}
   .nmo-cmp-legend span{display:flex;align-items:center;gap:5px}.nmo-cmp-legend i{display:inline-block;width:12px;height:9px;border-radius:2px;background:var(--acc)}
   .nmo-cmp-legend .selected{background:var(--gold)}
-  .nmo-grid{display:grid;grid-template-columns:minmax(250px,.85fr) minmax(360px,1.35fr) minmax(360px,1.35fr) minmax(180px,.55fr);gap:12px;align-items:start;width:100%}
+  .nmo-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.35fr) minmax(0,1.35fr) minmax(0,.55fr);gap:12px;align-items:start;width:100%}
   .nmo-pane{min-width:0}.nmo-pane canvas{width:100%;height:auto;image-rendering:auto}.nmo-pane .hint{margin-top:4px}
   .nmo-pane{padding:4px;background:#11161d;border:1px solid #202832;border-radius:5px}
   .nmo-pane .ttl{margin:0 0 7px 2px}
-  .analysis-grid{display:grid;grid-template-columns:minmax(380px,1.3fr) minmax(280px,.95fr) minmax(280px,.95fr);gap:12px;margin:12px 0;align-items:start}
+  .analysis-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,.95fr) minmax(0,.95fr);gap:12px;margin:12px 0;align-items:start}
   @media(max-width:1450px){.analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .analysis-grid canvas{width:100%;height:auto}
   .depth-block{margin:16px 0 4px;border-top:1px solid var(--line);padding-top:12px}

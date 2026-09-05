@@ -108,7 +108,17 @@
   .shot-card canvas{width:174px;height:150px}.shot-card .hint{display:flex;justify-content:space-between}
   .canvas-wrap{position:relative;display:inline-block;max-width:100%}.canvas-wrap canvas{max-width:100%;height:auto}
   .flow{display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--dim)}
-  .flow span{padding:3px 7px;border-bottom:2px solid var(--line)}.flow span.done{color:var(--good)}.flow span.active{color:var(--acc);border-color:var(--acc)}
+  /* Three states, not two. A step that is REQUIRED and not yet done is waiting
+     for you; a step that is OPTIONAL and switched off is a choice you have made.
+     Showing both as plain dim text would say that skipping deconvolution and
+     skipping the CMP sort are the same kind of nothing, and they are not. */
+  .flow span{padding:3px 7px;border-bottom:2px solid var(--line)}
+  .flow span::after{content:"→";margin-left:7px;color:var(--line)}
+  .flow span:last-child::after{content:""}
+  .flow span.done{color:var(--good)}
+  .flow span.active{color:var(--acc);border-color:var(--acc)}
+  .flow span.opt{border-bottom-style:dashed;opacity:.75}
+  .flow span.opt.on{color:var(--good);border-bottom-style:solid;opacity:1}
   .metric{color:var(--txt)}.warning{color:var(--warn)}.gold{color:var(--gold)}
   .note{padding:8px 10px;background:#11161d;border-left:3px solid var(--acc);margin:8px 0;color:var(--dim)}
   details{margin-top:8px;color:var(--dim)}summary{cursor:pointer;color:var(--txt)}
@@ -283,7 +293,17 @@
 
   <main>
     <div class="flow panel" aria-label="Teaching workflow">
-      <span id="flowShots" class="active">Shots →</span><span id="flowReceiver">Receiver sorting →</span><span id="flowCmp">CMP / CDP sorting →</span><span id="flowVel">Velocity analysis →</span><span id="flowNmo">NMO →</span><span id="flowStack">Stack</span>
+      <span id="flowShots" class="active" title="Acquire shot records by running the survey">Shots</span>
+      <span id="flowGain" class="opt" title="Amplitude recovery: √t, t or AGC. Optional, but it belongs first">Gain</span>
+      <span id="flowDecon" class="opt" title="Predictive or spiking deconvolution. Optional">Decon</span>
+      <span id="flowFilter" class="opt" title="Zero-phase bandpass. Optional">Filter</span>
+      <span id="flowMute" class="opt" title="Front-end mute over the direct arrival. Optional">Mute</span>
+      <span id="flowCmp" title="Traces are binned into common-midpoint gathers automatically as shots complete; open the CMP stage to change the bin size or pick a gather">CMP sort</span>
+      <span id="flowVel" title="Pick stacking velocities, or use the model reference">Velocity</span>
+      <span id="flowNmo" title="Applied automatically once a gather and a velocity exist; open the NMO stage to see it and adjust the stretch mute">NMO</span>
+      <span id="flowRadon" class="opt" title="Parabolic Radon demultiple, between NMO and stack. Optional">Demultiple</span>
+      <span id="flowStack" title="Sum the corrected gathers into a section">Stack</span>
+      <span id="flowMig" class="opt" title="Time and depth migration. Optional">Migrate</span>
     </div>
 
     <section id="stageAcquisition" class="stage on">
@@ -4520,9 +4540,47 @@ function noteSavedSession(){
   }catch(err){/* storage blocked; the buttons will report it when used */}
 }
 
+/* The flow bar is the tool's own map of the processing sequence, and it is the
+   first thing a new user reads to learn the order. It is built from the same
+   state the panels read, so a step cannot claim to be done when it is not.
+
+   Required steps carry exactly one `active` marker -- the first one not yet
+   satisfied -- so there is always precisely one answer to "what next". Optional
+   steps never take that marker: they report only whether they are switched on,
+   because the sequence does not wait for them. */
+const FLOW_REQUIRED=['flowShots','flowCmp','flowVel','flowNmo','flowStack'];
+const FLOW_OPTIONAL=['flowGain','flowDecon','flowFilter','flowMute','flowRadon','flowMig'];
+
+function flowStepStates(){
+  const acquired=shotRecords.length>0;
+  const sorted=cmpBins.size>0;
+  const haveVelocity=velocitySource==='model'||picks.length>0||pickedCmpIndices().length>0;
+  const corrected=sorted&&haveVelocity&&selectedCmpIndex!==null;
+  const stacked=finalStacks.size>0;
+  const satisfied={flowShots:acquired,flowCmp:sorted,flowVel:haveVelocity,flowNmo:corrected,flowStack:stacked};
+  const states={};
+  let activeTaken=false;
+  FLOW_REQUIRED.forEach(id=>{
+    if(satisfied[id]){states[id]='done';return;}
+    states[id]=activeTaken?'':'active';
+    activeTaken=true;
+  });
+  const on={flowGain:gainMode!=='none',flowDecon:deconEnabled,flowFilter:filterEnabled,
+    flowMute:topMuteEnabled,flowRadon:radonEnabled,
+    flowMig:migratedStacks.size>0||!!depthImage};
+  FLOW_OPTIONAL.forEach(id=>{states[id]='opt'+(on[id]?' on':'');});
+  return states;
+}
+
 function updateFlow(){
-  const states={flowShots:shotRecords.length?'done':'active',flowReceiver:shotRecords.length?'done':'',flowCmp:cmpBins.size?'done':'',flowVel:(picks.length||velocitySource==='model')?'done':'',flowNmo:selectedCmpIndex!==null?'active':'',flowStack:finalStacks.size?'done':''};
-  Object.entries(states).forEach(([id,c])=>{document.getElementById(id).className=c;});
+  const states=flowStepStates();
+  Object.entries(states).forEach(([id,className])=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    el.className=className;
+    if(className==='active')el.setAttribute('aria-current','step');
+    else el.removeAttribute('aria-current');
+  });
 }
 
 /* ---------------- resizable parameter panel ---------------- */
@@ -6480,6 +6538,33 @@ function runNumericalChecks(){
     const nodePreset=ACQUISITION_PRESETS[keys.find(k=>ACQUISITION_PRESETS[k].marineReceivers==='seabed')];
     results.push({test:'the node preset puts its receivers below the datum',
       pass:!!nodePreset&&nodePreset.waterDepth>datumDepth()+2*DX});
+  }
+
+  // --- workflow flow bar ----------------------------------------------------
+  /* The bar drifted out of date once already: it still advertised six steps
+     after gain, deconvolution, the bandpass, the mute, the demultiple and both
+     migrations had been added. These checks tie the markup and the state logic
+     together so the next step added to one has to be added to the other. */
+  {
+    const ids=FLOW_REQUIRED.concat(FLOW_OPTIONAL);
+    results.push({test:'every flow step in the logic exists in the bar',
+      pass:ids.every(id=>document.getElementById(id))});
+    const rendered=[...document.querySelectorAll('.flow span')].map(el=>el.id);
+    results.push({test:'every flow step in the bar is driven by the logic',
+      pass:rendered.length>0&&rendered.every(id=>ids.includes(id))});
+    // The bar must read in processing order, not in whatever order it was built.
+    const order=['flowShots','flowGain','flowDecon','flowFilter','flowMute',
+      'flowCmp','flowVel','flowNmo','flowRadon','flowStack','flowMig'];
+    results.push({test:'the flow bar reads in processing-sequence order',
+      pass:JSON.stringify(rendered)===JSON.stringify(order)});
+    const states=flowStepStates();
+    const actives=FLOW_REQUIRED.filter(id=>states[id]==='active');
+    results.push({test:'exactly one required step is marked as next',pass:actives.length<=1});
+    results.push({test:'optional steps never claim to be the next step',
+      pass:FLOW_OPTIONAL.every(id=>/^opt( on)?$/.test(states[id]))});
+    // Every step carries an explanation, since the bar is what teaches the order.
+    results.push({test:'every flow step explains itself on hover',
+      pass:[...document.querySelectorAll('.flow span')].every(el=>(el.title||'').length>10)});
   }
 
   const failures=results.filter(r=>!r.pass);

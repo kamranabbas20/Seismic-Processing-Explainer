@@ -166,6 +166,15 @@
     </div>
 
     <div class="grp">
+      <p class="ttl">Acquisition presets</p>
+      <select id="acqPreset" aria-label="Acquisition preset">
+        <option value="land">Onshore — planted spread</option>
+        <option value="streamer">Offshore — towed streamer</option>
+        <option value="obn">Offshore — ocean-bottom nodes</option>
+      </select>
+      <button id="applyAcqPreset">Apply acquisition preset</button>
+      <div class="hint" id="acqPresetInfo">Land spread: 48 planted stations at 20 m, 24 shots across them. Every shot records into the same stations, so a receiver id is a ground position and fold is flat across the middle of the line.</div>
+
       <p class="ttl">Environment</p>
       <label>Setting <select id="environment"><option value="onshore">Onshore (land)</option><option value="offshore">Offshore (marine)</option></select></label>
       <div id="marineBox" style="display:none">
@@ -4774,6 +4783,108 @@ function applyTeachingSurvey(){
   refreshReceiverControls();setup();drawCmpViews();render();
 }
 document.getElementById('surveyPreset').onclick=applyTeachingSurvey;
+/* ---------------- acquisition presets ---------------- */
+/* Environment, receiver layout, shot count and wavelet move together in real
+   surveys, and setting them one control at a time makes it easy to end up with
+   a combination nobody would ever shoot -- a 25 Hz land wavelet over a towed
+   streamer, or nodes planted at the datum in 200 m of water. Each preset is one
+   coherent survey.
+
+   The differences between them are the ones that matter to the data rather than
+   cosmetic: a streamer moves with the shot, so fold builds as a ramp and every
+   channel is a fixed offset; nodes stay put on the seabed while the boat shoots
+   over them, which is why the node spacing here is coarse and the shot count
+   high; and both marine cases carry a water column whose free surface rings,
+   while the land spread does not. */
+const ACQUISITION_PRESETS={
+  land:{
+    label:'Onshore — planted spread',
+    environment:'onshore',
+    receivers:{count:48,spacing:20,firstX:200},
+    shots:24,f0:25,tmax:1.20,
+    note:'Land spread: 48 planted stations at 20 m, 24 shots across them. Every shot records into the same stations, so a receiver id is a ground position and fold is flat across the middle of the line.'
+  },
+  streamer:{
+    label:'Offshore — towed streamer',
+    environment:'offshore',waterDepth:120,marineReceivers:'towed',
+    streamer:{channels:48,spacing:25,nearOffset:100,side:'trailing'},
+    shots:20,f0:35,tmax:1.20,
+    note:'Marine streamer: 48 channels at 25 m trailing a 100 m near offset, in 120 m of water. The spread moves with the source, so a channel is a fixed offset and fold ramps up from the end of the line. Expect a strong water-bottom multiple train.'
+  },
+  obn:{
+    label:'Offshore — ocean-bottom nodes',
+    environment:'offshore',waterDepth:200,marineReceivers:'seabed',
+    receivers:{count:26,spacing:40,firstX:170},
+    shots:28,f0:30,tmax:1.30,
+    note:'Ocean-bottom nodes: 26 nodes at 40 m on the seabed in 200 m of water, with 28 shots towed over them. Nodes are expensive and guns are cheap, so the receivers are sparse and the shots dense — the reverse of the streamer. The source stays near the surface; only the receivers are on the bottom.'
+  }
+};
+
+function applyAcquisitionPreset(key){
+  const preset=ACQUISITION_PRESETS[key];
+  if(!preset)return false;
+  if(!surveyChangeAllowed('Acquisition preset applied'))return false;
+
+  environment=preset.environment;
+  // Every preset shoots under a real sea or land surface; the absorbing top is
+  // a teaching device rather than a survey, so it is not part of any of them.
+  topBoundary='free';document.getElementById('topBoundary').value='free';
+  if(isOffshore()){
+    flattenSeabed(preset.waterDepth);
+    marineReceivers=preset.marineReceivers==='seabed'?'seabed':'towed';
+    if(selectedInterface===null)selectBoundary(SEABED);
+  }else{
+    if(selectedInterface===SEABED)selectBoundary(1);
+    marineReceivers='towed';
+  }
+
+  f0=preset.f0;tmax=preset.tmax;
+  document.getElementById('freq').value=f0;document.getElementById('fLbl').textContent=f0+' Hz';
+  document.getElementById('tmax').value=tmax;document.getElementById('tLbl').textContent=tmax.toFixed(2)+' s';
+
+  if(preset.streamer){
+    streamerChannels=preset.streamer.channels;streamerSpacing=preset.streamer.spacing;
+    streamerNearOffset=preset.streamer.nearOffset;streamerSide=preset.streamer.side;
+    document.getElementById('stCh').value=streamerChannels;
+    document.getElementById('stDx').value=streamerSpacing;
+    document.getElementById('stNear').value=streamerNearOffset;
+    document.getElementById('stSide').value=streamerSide;
+  }
+  if(preset.receivers){
+    const {spacing,firstX}=preset.receivers;
+    /* A spread that runs off the end of the model records nothing from the
+       stations past the edge, so the preset is trimmed to fit rather than
+       quietly losing them. The first version of the node preset asked for 32
+       nodes at 40 m from 170 m, whose far station lands at 1410 m on a 1300 m
+       model. */
+    const fits=Math.floor((MX*DX-2*DX-firstX)/spacing)+1;
+    const count=Math.max(2,Math.min(preset.receivers.count,fits));
+    recs=Array.from({length:count},(_,n)=>{
+      const i=Math.round((firstX+n*spacing)/DX);
+      return{id:n+1,i,j:receiverDepthCell(i)};
+    });
+    document.getElementById('pgN').value=count;
+    document.getElementById('pgDx').value=spacing;
+    document.getElementById('pgOff').value=firstX;
+  }
+  // Node depths follow the seabed, so they can only be resolved once the
+  // environment and the seabed itself are in place.
+  syncReceiverDepths();
+
+  refreshEnvironmentUI();refreshAcquisitionModeUI();syncActiveReceivers();refreshReceiverControls();
+  setup();
+  applySourceCountPreset(preset.shots);
+  drawCmpViews();drawFinalSection();render();
+  document.getElementById('acqPresetInfo').textContent=preset.note;
+  document.getElementById('stat').textContent=`Applied acquisition preset: ${preset.label}.`;
+  return true;
+}
+document.getElementById('acqPreset').onchange=()=>{
+  const preset=ACQUISITION_PRESETS[document.getElementById('acqPreset').value];
+  if(preset)document.getElementById('acqPresetInfo').textContent=preset.note;
+};
+document.getElementById('applyAcqPreset').onclick=()=>applyAcquisitionPreset(document.getElementById('acqPreset').value);
+
 function calculatedSourceBounds(){
   if(acquisitionMode()==='streamer'){
     const reach=streamerNearOffset+(Math.max(1,streamerChannels)-1)*streamerSpacing,pad=Math.min(reach,MODEL_W*.32);
@@ -6313,6 +6424,42 @@ function runNumericalChecks(){
         &&picked.every((q,k)=>k===0||q.t0>picked[k-1].t0)
         &&dixIntervals(picked,sourceWaveletDelay()).every(e=>e.stable)});
     semb=savedSemb;sembNT=savedNT;sembMax=savedMax;
+  }
+
+  // --- acquisition presets --------------------------------------------------
+  /* Validated as data rather than by applying them: applying a preset rebuilds
+     the model, the spread and the shot line, which is not something a self-test
+     running at load should do. What is checked is the coherence that a wrong
+     number breaks -- the node preset originally asked for a spread whose far
+     station sat at 1410 m on a 1300 m model, and every station past the edge
+     would have recorded nothing. */
+  {
+    const keys=Object.keys(ACQUISITION_PRESETS);
+    results.push({test:'acquisition presets cover land, streamer and nodes',
+      pass:keys.length>=3
+        &&keys.some(k=>ACQUISITION_PRESETS[k].environment==='onshore')
+        &&keys.some(k=>ACQUISITION_PRESETS[k].streamer)
+        &&keys.some(k=>ACQUISITION_PRESETS[k].marineReceivers==='seabed')});
+    const coherent=keys.every(k=>{
+      const preset=ACQUISITION_PRESETS[k];
+      if(preset.environment!=='onshore'&&preset.environment!=='offshore')return false;
+      if(!preset.streamer&&!preset.receivers)return false;
+      if(preset.environment==='offshore'&&!(preset.waterDepth>=MIN_WATER_DEPTH))return false;
+      if(preset.environment==='onshore'&&preset.marineReceivers)return false;
+      return preset.f0>0&&preset.tmax>0&&preset.shots>=2&&typeof preset.note==='string';
+    });
+    results.push({test:'every acquisition preset is internally coherent',pass:coherent});
+    const fits=keys.every(k=>{
+      const preset=ACQUISITION_PRESETS[k];
+      if(!preset.receivers)return true;
+      const {count,spacing,firstX}=preset.receivers;
+      return firstX>=0&&firstX+(count-1)*spacing<=MX*DX-2*DX;
+    });
+    results.push({test:'preset spreads fit inside the model',pass:fits});
+    // Nodes must end up on the seabed, not at the datum, or they are not nodes.
+    const nodePreset=ACQUISITION_PRESETS[keys.find(k=>ACQUISITION_PRESETS[k].marineReceivers==='seabed')];
+    results.push({test:'the node preset puts its receivers below the datum',
+      pass:!!nodePreset&&nodePreset.waterDepth>datumDepth()+2*DX});
   }
 
   const failures=results.filter(r=>!r.pass);

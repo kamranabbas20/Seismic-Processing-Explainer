@@ -111,6 +111,9 @@
   .analysis-grid canvas{width:100%;height:auto}
   .depth-block{margin:16px 0 4px;border-top:1px solid var(--line);padding-top:12px}
   .depth-block canvas{width:100%;height:auto;background:#0b0e12}
+  .mig-pair{display:grid;grid-template-columns:1fr;gap:10px}
+  @media(min-width:1500px){.mig-pair{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .ttl.sub{font-size:.72rem;opacity:.85;margin:0 0 4px}
   @media(max-width:1050px){.analysis-grid{grid-template-columns:1fr}}
   .progress{height:6px;background:#252c35;border-radius:4px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--acc)}
   .empty{padding:24px;text-align:center;color:var(--dim);border:1px dashed var(--line);border-radius:6px}
@@ -479,19 +482,28 @@
         <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
         <div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
         <div class="depth-block">
-          <p class="ttl">Depth migration — post-stack Kirchhoff</p>
+          <p class="ttl">Migration — time and depth, both plotted in depth</p>
           <div class="toolbar">
-            <button id="depthMigrateBtn">Depth migrate</button>
-            <label>Aperture <input type="number" id="depthAperture" value="500" min="100" max="3000" step="50" style="width:74px"> m</label>
+            <button id="depthMigrateBtn">Run both migrations</button>
+            <label>Depth aperture <input type="number" id="depthAperture" value="500" min="100" max="3000" step="50" style="width:74px"> m</label>
             <label><input type="checkbox" id="depthOverlay" checked> Overlay true interfaces</label>
           </div>
-          <canvas id="depthSection" width="1040" height="420" aria-label="Post-stack depth migrated section"></canvas>
-          <div class="hint" id="depthInfo">Stack all CMPs, then depth migrate. The image is in metres, not seconds.</div>
-          <div class="note">This sums along traveltimes computed through the interval velocity <b>field</b> by an eikonal solver, instead of along a hyperbola built from one RMS number per output point. That is what removes the laterally-invariant-velocity assumption the time-migrated section is bound by. The vertical axis is depth, so the true interfaces can be drawn straight on top with no time conversion.</div>
+          <div class="mig-pair">
+            <div>
+              <p class="ttl sub">Time migration, stretched to depth</p>
+              <canvas id="timeInDepthSection" width="1040" height="360" aria-label="Time migrated section converted to depth"></canvas>
+            </div>
+            <div>
+              <p class="ttl sub">Depth migration</p>
+              <canvas id="depthSection" width="1040" height="360" aria-label="Post-stack depth migrated section"></canvas>
+            </div>
+          </div>
+          <div class="hint" id="depthInfo">Stack all CMPs, then run both migrations. Each panel is in metres, so the true interfaces can be drawn on both.</div>
+          <div class="note">Both panels carry the same gold interfaces and the same vertical axis, so the difference between them is the difference between the two methods and nothing else. The upper one is the ordinary time-migrated section stretched into depth with the velocity field — a re-plot, adding no information, purely so it can be compared. The lower one sums along eikonal traveltimes through that field instead of along a hyperbola built from one RMS number per output point. Watch the flanks: time migration cannot represent the velocity changing sideways, so it bends them off the gold line and gathers the deep energy into a lens under the crest; depth migration puts them where they belong.</div>
           <div class="note">The arcs above the shallowest reflector are <b>migration aliasing</b>, not noise in the data. The stack is sampled every 20 m while the image grid is 5 m, so the summation curve is under-sampled and its impulse response does not fully cancel. A wider aperture reaches steeper parts of that curve and imports more of it, which is why the default is 500 m rather than the 800 m the time migration uses — try 300 m and 1200 m to see the trade against how much of the deep flanks get illuminated.</div>
-          <div class="note warning">It migrates with the model's own velocity field — the same array the wave simulation propagates through. That makes this a reference image showing what depth migration can recover when the velocity is right, not a result you could obtain from the recorded data alone. A real depth migration has to build that field first, and is only ever as good as it.</div>
+          <div class="note warning">Both migrate with the model's own velocity field — the same array the wave simulation propagates through. That makes these reference images showing what each method can recover when the velocity is right, not results obtainable from the recorded data alone. A real depth migration has to build that field first, and is only ever as good as it.</div>
         </div>
-        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), attenuation and Q, statics, DMO, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It migrates with the model's own velocity field, so it shows what depth imaging recovers when the velocity is right, not what could be obtained from the recorded data alone. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 2032 m/s under the flanks against 2598 m/s under the crest — 28% of lateral variation — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. The cure is depth migration, which this tool does not have. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), attenuation and Q, statics, DMO, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It migrates with the model's own velocity field, so it shows what depth imaging recovers when the velocity is right, not what could be obtained from the recorded data alone. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 2032 m/s under the flanks against 2598 m/s under the crest — 28% of lateral variation — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface (12%, 22%, 28%).</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
       </div>
     </section>
   </main>
@@ -3595,7 +3607,7 @@ function processAllCMPs(){
   const mode=document.getElementById('allVelocity').value,minFold=+document.getElementById('minFold').value;
   const field=pickedVelocityField();
   if(mode==='field'&&!field){document.getElementById('finalInfo').textContent='No velocity picks yet — pick on the semblance panel at one or more CMPs, or choose a different velocity source.';return;}
-  finalStacks=new Map();migratedStacks=new Map();depthImage=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  finalStacks=new Map();migratedStacks=new Map();depthImage=null;timeInDepthImage=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
   keys.forEach(index=>{
     const records=cmpBins.get(index);if(records.length<minFold)return;
     const center=cmpOrigin+index*cmpBinSize;
@@ -4084,7 +4096,7 @@ function drawFinalSection(){
   const cv=document.getElementById('finalSection'),ctx=cv.getContext('2d'),foldCv=document.getElementById('finalFold'),fc=foldCv.getContext('2d');
   const W=cv.width,H=cv.height,L=48,R=12,T=28,B=28,pw=W-L-R,ph=H-T-B;
   updateFinalViewControls();ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);fc.fillStyle='#0b0e12';fc.fillRect(0,0,foldCv.width,foldCv.height);
-  drawVelocityFieldPanel();drawDepthSection();
+  drawVelocityFieldPanel();drawMigrationComparison();
   const cmpKeys=[...cmpBins.keys()].sort((a,b)=>a-b),range=finalRange||(finalView==='model'?(cmpKeys.length?{min:cmpKeys[0],max:cmpKeys.at(-1)}:potentialSurveyCmpRange()):null);
   if(!range){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(finalView==='model'?'Build CMP gathers to establish the model-comparison midpoint range.':'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);return;}
   const activeStacks=finalView==='migrated'?migratedStacks:finalStacks;
@@ -4538,7 +4550,7 @@ function clearAcquisitionRecords(){
   running=false;paused=false;shotRecords=[];acquisitionTraces=[];cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;
   // Every derived product goes with the records, migration included -- leaving
   // it behind would show a migrated section belonging to data that is gone.
-  finalStacks.clear();migratedStacks.clear();depthImage=null;finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
+  finalStacks.clear();migratedStacks.clear();depthImage=null;timeInDepthImage=null;finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
   semb=null;sembDirty=true;cvsCache=null;pickSets=new Map();picks=[];
   activeShotId=null;setup();document.getElementById('pauseAcq').textContent='Pause';document.getElementById('acqProgress').style.width='0%';
   document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; run an acquisition to measure achieved speed. Solver dt and recorded traces are unchanged.`;
@@ -5424,26 +5436,63 @@ document.getElementById('prevCmpNmo').onclick=()=>moveCmp(-1,'nmo');document.get
 document.getElementById('processAll').onclick=processAllCMPs;document.getElementById('finalWiggle').onchange=drawFinalSection;
 document.getElementById('finalGain').oninput=e=>{document.getElementById('finalGainLbl').textContent=(+e.target.value).toFixed(1)+'×';drawFinalSection();};
 document.getElementById('finalTimeGain').onchange=drawFinalSection;
-/* ---------------- depth section display ---------------- */
-let depthImage=null,depthMigrationAperture=500,depthMigrationMs=0;
+/* ---------------- migration comparison display ---------------- */
+let depthImage=null,timeInDepthImage=null,depthMigrationAperture=500,depthMigrationMs=0;
 
-function drawDepthSection(){
-  const cv=document.getElementById('depthSection');
+/* Vertical two-way time to every depth on the image grid, integrated through
+   the same interval velocity field the migrations use. This is a re-plot of the
+   time-migrated section, not a second migration: it adds no information and
+   cannot correct anything the time migration got wrong. Its only job is to put
+   both results on one axis so the difference between them is the difference
+   between the methods. */
+function verticalTwoWayTimeField(){
+  const T=new Float32Array(MX*MZ);
+  for(let i=0;i<MX;i++){
+    let t=0;
+    for(let j=0;j<MZ;j++){
+      if(j>SURF)t+=2*DX/Math.max(1,vp[simIdx(i,j)]);
+      T[j*MX+i]=t;
+    }
+  }
+  return T;
+}
+
+function timeMigrationInDepth(stacks){
+  if(!stacks||!stacks.size)return null;
+  const keys=[...stacks.keys()].sort((a,b)=>a-b);
+  const reference=stacks.get(keys[0]).stack,nt=reference.nt,dt=reference.dt;
+  const delay=sourceWaveletDelay(),T=verticalTwoWayTimeField();
+  const image=new Float32Array(MX*MZ);
+  for(let i=0;i<MX;i++){
+    const index=Math.round((i*DX-cmpOrigin)/cmpBinSize);
+    const item=stacks.get(index);
+    if(!item)continue;
+    const samples=item.stack.samples;
+    for(let j=SURF+1;j<MZ;j++){
+      const f=(T[j*MX+i]+delay)/dt,i0=Math.floor(f);
+      if(i0<0||i0+1>=nt)continue;
+      const frac=f-i0;
+      image[j*MX+i]=samples[i0]*(1-frac)+samples[i0+1]*frac;
+    }
+  }
+  return image;
+}
+
+/* One renderer for both panels, so they cannot drift apart in clip, colour or
+   axis and produce a difference that is the display's rather than the data's. */
+function drawDepthImage(canvasId,image,emptyMessage){
+  const cv=document.getElementById(canvasId);
   if(!cv)return;
   const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
   const L=54,R=12,T=16,B=30,pw=W-L-R,ph=H-T-B;
   ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
   ctx.font='10px ui-sans-serif,system-ui,sans-serif';
-  const info=document.getElementById('depthInfo');
-  if(!depthImage){
-    ctx.fillStyle='#8a949f';
-    ctx.fillText('Stack all CMPs, then press Depth migrate.',L,T+22);
+  if(!image){
+    ctx.fillStyle='#8a949f';ctx.fillText(emptyMessage,L,T+22);
     return;
   }
-  /* Same robust clip as the time section: one bright band must not decide the
-     contrast for everything beneath it. */
   const sample=[];
-  for(let k=0;k<depthImage.length;k+=7){const v=Math.abs(depthImage[k]);if(v>1e-12)sample.push(v);}
+  for(let k=0;k<image.length;k+=7){const v=Math.abs(image[k]);if(v>1e-12)sample.push(v);}
   sample.sort((a,b)=>a-b);
   const clip=sample.length?Math.max(1e-9,sample[Math.floor((sample.length-1)*.985)]):1e-9;
 
@@ -5453,9 +5502,8 @@ function drawDepthSection(){
     const jTo=Math.max(jFrom+1,Math.min(MZ,Math.floor((py+1)/img.height*MZ)));
     for(let px=0;px<img.width;px++){
       const i=Math.min(MX-1,Math.floor(px/img.width*MX));
-      // Envelope down the pixel row, so the wavelet is not aliased into banding.
       let best=0;
-      for(let j=jFrom;j<jTo;j++){const v=depthImage[j*MX+i];if(Math.abs(v)>Math.abs(best))best=v;}
+      for(let j=jFrom;j<jTo;j++){const v=image[j*MX+i];if(Math.abs(v)>Math.abs(best))best=v;}
       const u=Math.max(-1,Math.min(1,best/clip));
       const g=Math.round(u>=0?118+u*137:118+u*110);
       const o=(py*img.width+px)*4;
@@ -5465,11 +5513,9 @@ function drawDepthSection(){
   ctx.putImageData(img,L,T);
 
   if(document.getElementById('depthOverlay').checked){
-    /* The model is already in depth, so the true interfaces go straight on with
-       no conversion -- the one thing a depth section makes easy. */
-    ctx.lineWidth=1.3;
+    ctx.lineWidth=1.3;ctx.strokeStyle='rgba(255,200,87,.85)';
     for(let k=1;k<layers.length;k++){
-      ctx.strokeStyle='rgba(255,200,87,.85)';ctx.beginPath();
+      ctx.beginPath();
       for(let i=0;i<MX;i++){
         const depth=modelInterfaceDepth(k,i),x=L+i/(MX-1)*pw,y=T+depth/(MZ*DX)*ph;
         i?ctx.lineTo(x,y):ctx.moveTo(x,y);
@@ -5490,28 +5536,34 @@ function drawDepthSection(){
     const x=L+q/4*pw;
     ctx.textAlign='center';ctx.fillText(`${Math.round(q/4*(MX-1)*DX)} m`,x,H-8);ctx.textAlign='left';
   }
-  ctx.fillStyle='#8a949f';ctx.textAlign='center';
-  ctx.fillText('depth ↓   ·   surface position →',L+pw/2,T-4);ctx.textAlign='left';
+}
+
+function drawMigrationComparison(){
+  drawDepthImage('timeInDepthSection',timeInDepthImage,'Run the time migration, then press Run both migrations.');
+  drawDepthImage('depthSection',depthImage,'Stack all CMPs, then press Run both migrations.');
 }
 
 function runDepthMigration(){
   if(!finalStacks.size){
-    document.getElementById('depthInfo').textContent='NMO + Stack All CMPs before depth migrating.';
+    document.getElementById('depthInfo').textContent='NMO + Stack All CMPs before migrating.';
     return;
   }
   depthMigrationAperture=Math.max(100,Math.min(3000,+document.getElementById('depthAperture').value||500));
   document.getElementById('depthAperture').value=depthMigrationAperture;
+  // The time migration is run here too, so the pair is always the same stack
+  // through both methods rather than whatever happened to be left over.
+  if(!migratedStacks.size)runMigration();
   const started=performance.now();
   depthImage=depthMigrate(finalStacks,depthMigrationAperture);
+  timeInDepthImage=timeMigrationInDepth(migratedStacks);
   depthMigrationMs=performance.now()-started;
-  drawDepthSection();
-  const bins=finalStacks.size;
+  drawMigrationComparison();
   document.getElementById('depthInfo').innerHTML=
-    `Depth migrated ${bins} CMP bins onto a ${MX} × ${MZ} grid at ${DX} m in ${depthMigrationMs.toFixed(0)} ms · aperture ${depthMigrationAperture} m`+
-    `<br>eikonal traveltimes through the model's own interval velocity field · exploding reflector at half velocity`;
+    `${finalStacks.size} CMP bins through both methods · depth grid ${MX} × ${MZ} at ${DX} m · ${depthMigrationMs.toFixed(0)} ms`+
+    `<br>time migration: hyperbolic, one RMS velocity per output point, aperture ${migrationAperture} m · depth migration: eikonal traveltimes through the velocity field, aperture ${depthMigrationAperture} m`;
 }
 document.getElementById('depthMigrateBtn').onclick=runDepthMigration;
-document.getElementById('depthOverlay').onchange=drawDepthSection;
+document.getElementById('depthOverlay').onchange=drawMigrationComparison;
 document.getElementById('depthAperture').onchange=()=>{if(depthImage)runDepthMigration();};
 
 document.getElementById('finalViewStack').onclick=()=>setFinalComparisonView('stack');
@@ -6069,6 +6121,25 @@ function runNumericalChecks(){
     const wavelength=velocity/f0;
     results.push({test:'depth migration images a flat event at the depth its time implies',
       pass:bestJ>0&&Math.abs(bestJ*DX-expectedDepth)<wavelength});
+  }
+
+  /* The two migration panels are only comparable if their depth axes agree.
+     The time section is stretched with a vertical two-way time integral while
+     the depth section is built from eikonal traveltimes, so the two must give
+     the same answer straight down a column -- otherwise a difference between
+     the panels could be the axes disagreeing rather than the methods. */
+  {
+    const vertical=verticalTwoWayTimeField();
+    const slow=explodingReflectorSlowness();
+    const column=Math.floor(MX/2);
+    const T=eikonalFromSurface(column,slow,MX,MZ,DX,SURF);
+    let worst=0;
+    for(let j=SURF+6;j<MZ;j++){
+      const a=vertical[j*MX+column],b=T[j*MX+column];
+      if(a>0)worst=Math.max(worst,Math.abs(a-b)/a);
+    }
+    results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
+      pass:worst<.02});
   }
 
   const failures=results.filter(r=>!r.pass);

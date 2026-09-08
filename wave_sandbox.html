@@ -527,6 +527,8 @@
             <button id="vAuto">Show Model RMS</button><button id="vAutoPick">Auto-pick peaks</button><button id="vAutoPickLine">Auto-pick across the line</button>
             <label>every <select id="autoPickStride"><option>1</option><option>2</option><option selected>4</option><option>8</option></select> CMPs</label>
             <button id="vClear">Clear picks</button>
+            <label>η (4th-order moveout) <input class="compact-range" type="range" id="etaValue" min="-40" max="40" step="2" value="0"><span id="etaLbl" class="metric">0.00</span></label>
+            <button id="etaScan">Scan η</button>
             <label>Stretch mute <select id="stretchMute"><option value="off">OFF</option><option value="0.3">30%</option><option value="0.5" selected>50%</option><option value="0.75">75%</option><option value="1">100%</option></select></label>
             <label><input type="checkbox" id="topMuteOn"> top mute</label>
             <label>mute t₀ <input class="compact-range" type="range" id="muteT0" min="0" max="0.5" step="0.01" value="0.06"><span id="muteT0Lbl" class="metric">0.06 s</span></label>
@@ -535,7 +537,7 @@
             <label><input type="checkbox" id="exactMoveout" checked> exact layered-model curve</label>
             <label><input type="checkbox" id="showMultiples" checked> predicted multiples</label>
           </div>
-          <div class="hint" id="nmoInfo">Bright spots mark coherent reflections.</div><div class="hint" id="pickList"></div>
+          <div class="hint" id="nmoInfo">Bright spots mark coherent reflections.</div><div class="hint" id="pickList"></div><div class="note"><b>η</b> adds the fourth-order term to the moveout equation: t² = t₀² + x²/v² − 2ηx⁴ / (v²(t₀²v² + (1+2η)x²)). A hyperbola is exact only for one flat layer; layering, lateral change and reflector curvature all put a fourth-order departure into the moveout that one velocity cannot absorb. <b>Scan η</b> tries the range and keeps the value that maximises stack power, the same criterion a constant-velocity stack uses for velocity.</div><div class="note warning"><b>η here is not anisotropy.</b> That equation comes from VTI theory, where η is built from Thomsen parameters — but this solver is isotropic and acoustic. It has no shear wave to split. What is being fitted is the departure from a hyperbola caused by curvature and layering; the equation is used because it is the standard well-behaved two-parameter description of that departure, and the number should be read as “how far from hyperbolic this gather is”, nothing more.</div><div class="note warning"><b>Measured: it does not fix a bow-tie, and the reason is worth knowing.</b> On the two-layer syncline the scan returns η = −0.04 and the far-offset artefact barely moves — 14 of 55 flagged bins become 13 — while the primary weakens from 0.65 to 0.54 of the trace peak. A triplication is <em>multi-valued</em> moveout: three arrivals with different curves share one midpoint, and no single curve, hyperbolic or fourth-order, can flatten three events at once. η fixes a single arrival that departs from a hyperbola, which is the classic long-offset case; it cannot fix a gather that holds several arrivals. That is what pre-stack migration is for, because it maps energy to image points instead of fitting a curve to it.</div>
         </div>
       </div>
     </section>
@@ -601,7 +603,7 @@
           
           <div class="note"><b>Bottom left</b> is the same depth migration run through a velocity model built from the data instead: pick stacking velocities on several CMPs, Dix them into interval velocities, integrate those to depth, interpolate sideways between the picked locations. Nothing in that chain consults the model. <b>Bottom right</b> is what the chain got wrong — derived minus true interval velocity, blue too slow, red too fast, with a cyan line at every picked CMP and a tick where its deepest pick ran out. Below that tick the derived model is not so much wrong as absent: the last interval velocity is simply held, because no reflection ever constrained what is down there.</div><div class="note">Press <b>Auto-pick across the line</b> on the Velocity stage first, or the derived model has a single column and no lateral variation at all. The stride matters, but measured on the anticline preset it does not matter in the direction you would guess: picking every gather (46 columns) gives a <em>worse</em> velocity field than picking every eighth (5 columns) — 635 against 540 m/s RMS above the deepest reflector — because the auto-picker’s scatter from gather to gather is larger than the lateral variation it is trying to resolve, and interpolating over long distances averages that scatter away. Denser picking only starts to pay once the picks are better than the structure is strong.</div><div class="note">The arcs above the shallowest reflector are <b>migration aliasing</b>, not noise in the data. The stack is sampled every 20 m while the image grid is 5 m, so the summation curve is under-sampled and its impulse response does not fully cancel. A wider aperture reaches steeper parts of that curve and imports more of it, which is why the default is 500 m rather than the 800 m the time migration uses — try 300 m and 1200 m to see the trade against how much of the deep flanks get illuminated.</div><div class="note warning">The top two panels migrate with the model’s own velocity field — the same array the wave simulation propagates through. They are reference images: what each method recovers when the velocity is right, not results obtainable from the recorded data alone. The bottom-left panel is the honest one, the image this survey could actually have produced. The gap between them is the cost of not knowing the velocity, and it is the only one of the three a real project ever gets to see.</div>
         </div>
-        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: constant-Q attenuation of the recorded traces, amplitude recovery (√t, t or AGC), f–k dip fan filtering, predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, DMO, CMP stack, and post-stack Kirchhoff time and depth migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), statics, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 1912 m/s at the end of the imaged line against 2598 m/s under the crest — 36% of lateral variation across the section that gets migrated — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: constant-Q attenuation of the recorded traces, amplitude recovery (√t, t or AGC), f–k dip fan filtering, predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, DMO, CMP stack, and post-stack Kirchhoff time and depth migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), statics and pre-stack migration. Fourth-order moveout is present as a fitting parameter, but there is no anisotropy in the solver for it to measure. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 1912 m/s at the end of the imaged line against 2598 m/s under the crest — 36% of lateral variation across the section that gets migrated — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
       </div>
     </section>
   </main>
@@ -3033,10 +3035,68 @@ let hyperbolaSnapInfo=null;
    the source delay. Keeping this in one function prevents the overlay,
    semblance and NMO sampler from silently using different time conventions. */
 function sourceWaveletDelay(){return 1.1/f0;}
-function moveoutTime(t0,offset,velocity,delay=sourceWaveletDelay()){
+/* ---------------- non-hyperbolic moveout ----------------
+
+   t^2 = t0^2 + x^2/v^2 is exact only for a single flat layer. Everything else
+   -- layering, lateral change, and above all reflector CURVATURE -- puts a
+   fourth-order term into the moveout, and one velocity per midpoint cannot
+   absorb it. The far offsets are then left mis-corrected, and the stack sums
+   that residual into events the earth never produced.
+
+   The correction is the Alkhalifah-Tsvankin form,
+
+       t^2 = t0^2 + x^2/v^2 - 2 eta x^4 / ( v^2 ( t0^2 v^2 + (1+2 eta) x^2 ) )
+
+   ETA HERE IS NOT ANISOTROPY. That equation was derived for VTI media and eta
+   is normally a combination of Thomsen parameters, but this solver is
+   isotropic and acoustic -- it has no shear wave to split and no anisotropy to
+   measure. What is being fitted is the fourth-order departure from a hyperbola
+   caused by curvature and heterogeneity. The equation is used because it is the
+   standard, well-behaved two-parameter description of that departure, not
+   because the model is anisotropic, and the value it returns should be read as
+   "how far from hyperbolic this gather is", nothing more. */
+let nmoEta=0;
+
+function moveoutTime(t0,offset,velocity,delay=sourceWaveletDelay(),eta=nmoEta){
   if(!(velocity>0))return Infinity;
   const physicalT0=Math.max(0,t0-delay);
-  return delay+Math.sqrt(physicalT0*physicalT0+(offset*offset)/(velocity*velocity));
+  const x2=offset*offset,v2=velocity*velocity;
+  const hyperbolic=physicalT0*physicalT0+x2/v2;
+  if(!eta)return delay+Math.sqrt(hyperbolic);
+  const denominator=v2*(physicalT0*physicalT0*v2+(1+2*eta)*x2);
+  const fourthOrder=denominator>0?(2*eta*x2*x2)/denominator:0;
+  /* Clamped at zero: a large negative eta on a far trace can drive the radicand
+     through zero, and an imaginary traveltime is not a moveout curve. */
+  return delay+Math.sqrt(Math.max(0,hyperbolic-fourthOrder));
+}
+
+/* Stack power against eta, for the gather in front of you. Flattening a gather
+   better makes its stack louder, so the eta that maximises stack power is the
+   one that fits the fourth-order moveout -- the same criterion a
+   constant-velocity stack uses for velocity, applied to the other parameter. */
+const ETA_SCAN_LIMIT=.4,ETA_SCAN_STEP=.02;
+function stackPowerAtEta(records,velocityFunction,eta){
+  const saved=nmoEta;
+  nmoEta=eta;
+  let power=0;
+  try{
+    const stack=stackOf(applyNMO(records,velocityFunction,stretchLimit));
+    if(stack)for(let i=0;i<stack.nt;i++)power+=stack.samples[i]*stack.samples[i];
+  }finally{nmoEta=saved;}
+  return power;
+}
+
+function scanEta(records,velocityFunction){
+  if(!records||records.length<4)return null;
+  const curve=[];
+  for(let eta=-ETA_SCAN_LIMIT;eta<=ETA_SCAN_LIMIT+1e-9;eta+=ETA_SCAN_STEP){
+    curve.push({eta:+eta.toFixed(3),power:stackPowerAtEta(records,velocityFunction,+eta.toFixed(3))});
+  }
+  let best=curve[0];
+  curve.forEach(point=>{if(point.power>best.power)best=point;});
+  const flat=curve.find(point=>Math.abs(point.eta)<1e-9);
+  return {curve,best,hyperbolic:flat||null,
+    gain:flat&&flat.power>0?best.power/flat.power:null};
 }
 
 function interpolateVelocity(points,t0,fallback=vnmo){
@@ -5332,7 +5392,7 @@ function collectSessionState(){
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
-      migrationAperture,dmoEnabled,offsetTestFraction,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
+      migrationAperture,dmoEnabled,offsetTestFraction,nmoEta,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
       depthMigrationAperture,depthDerived:document.getElementById('depthDerived').checked,
       autoPickStride:document.getElementById('autoPickStride').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
@@ -5410,6 +5470,7 @@ function applySessionState(state){
     if(list.length)pickSets.set(index,list);
   });
   noiseLevel=clampNumber(proc.noiseLevel,noiseLevel,0,2);
+  nmoEta=clampNumber(proc.nmoEta,nmoEta,-ETA_SCAN_LIMIT,ETA_SCAN_LIMIT);
   qFactor=Q_CHOICES.includes(+proc.qFactor)?+proc.qFactor:qFactor;
   if(['off','reject','pass'].includes(proc.fkMode))fkMode=proc.fkMode;
   fkVelocity=clampNumber(proc.fkVelocity,fkVelocity,200,9000);
@@ -5462,6 +5523,7 @@ function syncControlsFromState(proc){
   set('vnmo',vnmo);set('nmoGain',nmoDisplayGain);set('migAperture',migrationAperture);
   set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);set('noiseLevel',Math.round(noiseLevel*100));
   set('qFactor',String(Math.max(0,Q_CHOICES.indexOf(qFactor))));document.getElementById('qLbl').textContent=qLabel();
+  set('etaValue',String(Math.round(nmoEta*100)));document.getElementById('etaLbl').textContent=nmoEta.toFixed(2);
   set('fkMode',fkMode);set('fkVelocity',fkVelocity);set('fkTaper',String(fkTaper));
   set('stretchMute',stretchLimit===null?'off':String(stretchLimit));
   [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
@@ -7126,6 +7188,29 @@ document.getElementById('vAutoPickLine').onclick=()=>{
     :`No clear semblance peaks in any of the ${summary.visited} gathers visited — pick manually.`;
   refreshPickList();drawNmo();drawVelocityFieldPanel();updateFlow();
 };
+document.getElementById('etaValue').oninput=e=>{
+  nmoEta=(+e.target.value||0)/100;
+  document.getElementById('etaLbl').textContent=nmoEta.toFixed(2);
+  drawNmo();
+};
+document.getElementById('etaScan').onclick=()=>{
+  const info=document.getElementById('nmoInfo');
+  const records=selectedCmpTraces();
+  if(records.length<4){info.textContent='Select a CMP with at least four traces first.';return;}
+  const centre=cmpOrigin+selectedCmpIndex*cmpBinSize;
+  const velocityFunction=(t0)=>vAt(t0,centre);
+  const started=performance.now();
+  const scan=scanEta(records,velocityFunction);
+  if(!scan){info.textContent='Not enough traces to scan.';return;}
+  nmoEta=scan.best.eta;
+  document.getElementById('etaValue').value=String(Math.round(nmoEta*100));
+  document.getElementById('etaLbl').textContent=nmoEta.toFixed(2);
+  info.textContent=`η scan at CMP ${selectedCmpIndex}: best η = ${nmoEta.toFixed(2)}, `+
+    `stack power ${scan.gain?scan.gain.toFixed(2)+'× the hyperbolic value':'unavailable'} `+
+    `(${scan.curve.length} trials in ${(performance.now()-started).toFixed(0)} ms). `+
+    `η is a fit to fourth-order moveout from curvature and layering — this solver is isotropic, so it is not anisotropy.`;
+  drawNmo();
+};
 document.getElementById('vClear').onclick=e=>{
   if(e.shiftKey){
     pickSets=new Map();picks=[];
@@ -7683,6 +7768,72 @@ function runNumericalChecks(){
     }
     results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
       pass:worst<.02});
+  }
+
+  // --- non-hyperbolic moveout ----------------------------------------------
+  /* The equation and the scan are checked against data BUILT with a known eta,
+     so a correct implementation has to recover it. That is deliberately
+     separate from whether eta helps on any particular model: it does not fix
+     the syncline (see the panel), and the reason is that a triplication is
+     multi-valued moveout, which no single curve can flatten. An implementation
+     test must not be allowed to inherit that failure. */
+  {
+    /* Built with the tool's own causal-wavelet delay, because that is what
+       applyNMO assumes. A first version of this test used delay = 0 and the
+       scan then fitted a curve displaced from the data, which moved the
+       recovered eta -- the convention was wrong, not the operator. */
+    const dt=.002,nt=800,fw=30,v=2200,delay=sourceWaveletDelay(),t0=delay+.5;
+    const offsets=[];
+    for(let k=0;k<24;k++)offsets.push(80+k*80);
+    const build=eta=>offsets.map((offset,k)=>{
+      const samples=new Float32Array(nt);
+      const arrival=moveoutTime(t0,offset,v,delay,eta);
+      const centre=Math.round(arrival/dt);
+      for(let j=-40;j<=40;j++){
+        const a=Math.PI*fw*(j*dt),a2=a*a,i=centre+j;
+        if(i>=0&&i<nt&&a2<50)samples[i]=(1-2*a2)*Math.exp(-a2);
+      }
+      return {shotId:k+1,receiverId:k+1,sourceX:0,receiverX:offset,midpointX:0,
+        sourceReceiverOffset:offset,halfOffset:offset/2,samples,dt,nt};
+    });
+
+    // 1. eta = 0 must be the hyperbola exactly, not merely close to it
+    {
+      let worst=0;
+      offsets.forEach(offset=>{
+        const hyperbolic=delay+Math.sqrt((t0-delay)*(t0-delay)+offset*offset/(v*v));
+        worst=Math.max(worst,Math.abs(moveoutTime(t0,offset,v,delay,0)-hyperbolic));
+      });
+      results.push({test:'moveout with eta = 0 is exactly hyperbolic',pass:worst<1e-12});
+    }
+
+    // 2. positive eta must move the far offsets, and more than the near ones
+    {
+      const near=Math.abs(moveoutTime(t0,160,v,delay,.2)-moveoutTime(t0,160,v,delay,0));
+      const far=Math.abs(moveoutTime(t0,1600,v,delay,.2)-moveoutTime(t0,1600,v,delay,0));
+      results.push({test:'eta acts on the far offsets, not the near ones',pass:far>20*near&&near<.002});
+    }
+
+    // 3. the scan recovers an eta the data was built with
+    {
+      const truth=.15;
+      const saved=nmoEta,savedLimit=stretchLimit,savedMute=topMuteEnabled;
+      nmoEta=0;stretchLimit=null;topMuteEnabled=false;
+      const scan=scanEta(build(truth),()=>v);
+      nmoEta=saved;stretchLimit=savedLimit;topMuteEnabled=savedMute;
+      results.push({test:'the eta scan recovers the value the gather was built with',
+        pass:!!scan&&Math.abs(scan.best.eta-truth)<=.04&&scan.gain>1.05});
+    }
+
+    // 4. and returns zero for a gather that really is hyperbolic
+    {
+      const saved=nmoEta,savedLimit=stretchLimit,savedMute=topMuteEnabled;
+      nmoEta=0;stretchLimit=null;topMuteEnabled=false;
+      const scan=scanEta(build(0),()=>v);
+      nmoEta=saved;stretchLimit=savedLimit;topMuteEnabled=savedMute;
+      results.push({test:'the eta scan returns zero on a hyperbolic gather',
+        pass:!!scan&&Math.abs(scan.best.eta)<=.04});
+    }
   }
 
   // --- the far-offset test --------------------------------------------------

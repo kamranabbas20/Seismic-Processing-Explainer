@@ -564,7 +564,7 @@
         <p class="ttl" style="margin-top:8px">Fold</p>
         <canvas id="finalFold" width="1040" height="110" aria-label="Fold aligned to final CMP stack"></canvas>
         <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
-        <div class="note"><b>DMO</b> runs between NMO and the stack, across midpoints within each common-offset section, because it is a constant-offset operator and cannot be applied one CMP at a time. An input sample at midpoint y and NMO time t<sub>n</sub> maps onto the ellipse (Δy/h)² + (t₀/t<sub>n</sub>)² = 1, so the operator reads its inputs at t<sub>n</sub> = t₀/√(1−Δy²/h²). At Δy = 0 that mapping is stationary, which is what concentrates a flat event back onto itself instead of smearing it around the ellipse. The point of it is that one stacking velocity cannot flatten two dips sharing a midpoint — exactly what happens at a syncline bow-tie.</div><div class="note warning"><b>Measured, and it does not pay on this tool’s geometry.</b> On the one-interface syncline with 24 shots and the model velocity, RMS time error of the imaged reflector against the model is <b>23.5 ms</b> in the stack and <b>12.4 ms</b> after migration without DMO, against <b>25.2 ms</b> and <b>13.4 ms</b> with it, and the mean peak amplitude drops from 2241 to 1865. DMO makes this case slightly worse. Two costs outweigh the benefit here: energy is preserved per section, so what a flat reflector loses at its peak — measured at 35%, 19% and 15% for half-offsets of 200, 400 and 600 m — goes into the operator’s own smile; and recorded offsets are not repeated exactly from midpoint to midpoint, so traces are binned into 40 m-wide common-offset sections and the operator is handed a mean half-offset, which at short offset is a large fraction of the aperture it is supposed to use. The geometry is right — the self-tests hold a dipping event to the ellipse’s stationary point within 3 samples — and it still costs more than it buys. Leave it off unless you want to watch that trade.</div><div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
+        <div class="note"><b>DMO</b> runs between NMO and the stack, across midpoints within each common-offset section, because it is a constant-offset operator and cannot be applied one CMP at a time. An input sample at midpoint y and NMO time t<sub>n</sub> maps onto the ellipse (Δy/h)² + (t₀/t<sub>n</sub>)² = 1, so the operator reads its inputs at t<sub>n</sub> = t₀/√(1−Δy²/h²). At Δy = 0 that mapping is stationary, which is what concentrates a flat event back onto itself instead of smearing it around the ellipse. The point of it is that one stacking velocity cannot flatten two dips sharing a midpoint — exactly what happens at a syncline bow-tie.</div><div class="note warning"><b>Measured, and it does not pay here.</b> On the one-interface syncline with 24 shots, RMS time error of the imaged reflector against the model is <b>23.5 ms</b> stacked and <b>12.4 ms</b> migrated without DMO, against <b>25.6</b> and <b>12.9</b> with it; mean peak amplitude drops from 1786 to 1637. Three explanations were tested and two of them are wrong. <b>Offset binning was real:</b> sections were originally 40 m wide in offset on a spread recording every 20 m, so the operator got a mean half-offset instead of one number — binning on the geometry’s own offset increment halved the migrated penalty, from +1.0 ms to +0.45 ms. <b>The weight shape is not the cause:</b> sweeping the exponent from 1 to 12 moves the migrated error only between 12.73 and 12.89 ms. <b>And it is not that the test was unfair:</b> handing NMO the true velocity does much of DMO’s job for it, so the obvious suspicion is that DMO would win once velocities are picked from the data instead — it does not. With velocities auto-picked at 27 CMPs the migrated error goes from 15.6 ms without DMO to <b>19.3 ms</b> with it, a larger penalty, not a smaller one. The geometry is right — the self-tests hold a dipping event to the ellipse’s stationary point within three samples — and it still costs more than it buys. What is left is the regularisation itself: irregular midpoints and offsets resampled onto a grid, with duplicates averaged. Fixing that is trace interpolation, which is a different piece of work. Leave DMO off unless you want to watch the trade.</div><div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
         <div class="depth-block">
           <p class="ttl">Migration — time and depth, both plotted in depth</p>
           <div class="toolbar">
@@ -4370,34 +4370,63 @@ const DMO_TAPER=.15;                 // cosine taper over the outer 15% of the a
    none of the operator. */
 let DMO_WEIGHT_POWER=3;
 
-/* Traces are grouped into common-offset sections on the CMP grid, because DMO
-   is a constant-offset operator and the recorded offsets are not exactly
-   repeated from midpoint to midpoint. Two traces landing in the same offset bin
-   at the same midpoint are averaged and share the corrected result. */
+/* The offset increment the geometry actually produced, taken as the median gap
+   between the distinct absolute offsets on the line. For a regular spread that
+   is the receiver spacing exactly, so binning on half of it puts every trace in
+   a section whose half-offset is a single number rather than a range.
+
+   Binning on the CMP grid instead -- which is what this did first -- makes the
+   sections 40 m wide in offset when the spread records every 20 m, so the
+   operator is handed a mean half-offset that at short offset is a large
+   fraction of the aperture it is supposed to use. That was measured as one of
+   the two reasons DMO cost more than it bought. */
+function dmoOffsetStep(nmoByIndex){
+  const seen=new Set();
+  nmoByIndex.forEach(entry=>{
+    entry.result.correctedRecords.forEach(record=>{
+      seen.add(Math.round(Math.abs(record.sourceReceiverOffset)));
+    });
+  });
+  const offsets=[...seen].sort((a,b)=>a-b),gaps=[];
+  for(let n=1;n<offsets.length;n++){
+    const gap=offsets[n]-offsets[n-1];
+    if(gap>0)gaps.push(gap);
+  }
+  if(!gaps.length)return Math.max(DX,cmpBinSize);
+  gaps.sort((a,b)=>a-b);
+  return Math.max(DX,gaps[Math.floor(gaps.length/2)]);
+}
+
+/* Traces are grouped into common-offset sections, because DMO is a
+   constant-offset operator. Two traces landing in the same section at the same
+   midpoint are averaged and share the corrected result. */
 function dmoCorrectAll(nmoByIndex){
   const spacing=cmpBinSize,groups=new Map();
+  const halfStep=Math.max(DX/2,dmoOffsetStep(nmoByIndex)/2);
   let contributing=0;
   nmoByIndex.forEach((entry,index)=>{
     const records=entry.result.correctedRecords;
     records.forEach((record,k)=>{
       const half=Math.abs(record.sourceReceiverOffset)/2;
-      const bin=Math.round(half/spacing);
-      if(bin<1)return;                       // no aperture at (near) zero offset
+      const bin=Math.round(half/halfStep);
+      if(bin*halfStep<spacing)return;        // no useful aperture at short offset
       if(!groups.has(bin))groups.set(bin,new Map());
       const byMid=groups.get(bin);
-      if(!byMid.has(index))byMid.set(index,{sum:new Float64Array(record.nt),n:0,halfSum:0,nt:record.nt,dt:record.dt,members:[]});
+      if(!byMid.has(index))byMid.set(index,{sum:new Float64Array(record.nt),n:0,half:bin*halfStep,nt:record.nt,dt:record.dt,members:[]});
       const slot=byMid.get(index);
       const nt=Math.min(slot.sum.length,record.nt);
       for(let i=0;i<nt;i++)slot.sum[i]+=record.samples[i];
-      slot.n++;slot.halfSum+=half;slot.members.push({index,k});
+      slot.n++;slot.members.push({index,k});
       contributing++;
     });
   });
   let corrected=0;
   groups.forEach(byMid=>{
     if(byMid.size<3)return;
+    /* Every slot in a section now carries the same half-offset by construction,
+       so this is the section's own number and not an average over a range. */
     let halfTotal=0,count=0;
-    byMid.forEach(slot=>{halfTotal+=slot.halfSum;count+=slot.n;});
+    byMid.forEach(slot=>{halfTotal+=slot.half*slot.n;count+=slot.n;});
     const half=Math.max(spacing,halfTotal/Math.max(1,count));
     const lag=Math.min(byMid.size-1,Math.floor(half/spacing));
     if(lag<1)return;

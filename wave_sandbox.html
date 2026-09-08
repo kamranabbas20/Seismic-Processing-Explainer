@@ -142,6 +142,9 @@
   .depth-block{margin:16px 0 4px;border-top:1px solid var(--line);padding-top:12px}
   .depth-block canvas{width:100%;height:auto;background:#0b0e12}
   .mig-pair{display:grid;grid-template-columns:1fr;gap:10px}
+  .fk-pair{display:grid;grid-template-columns:1fr;gap:10px}
+  .fk-pair canvas{width:100%;height:auto;background:#0b0e12}
+  @media(min-width:1200px){.fk-pair{grid-template-columns:repeat(2,minmax(0,1fr))}}
   @media(min-width:1500px){.mig-pair{grid-template-columns:repeat(2,minmax(0,1fr))}}
   .ttl.sub{font-size:.72rem;opacity:.85;margin:0 0 4px}
   @media(max-width:1050px){.analysis-grid{grid-template-columns:1fr}}
@@ -341,6 +344,7 @@
           <button id="tabGain" class="tab">Gain</button>
           <button id="tabDecon" class="tab">Deconvolution</button>
           <button id="tabSpectrum" class="tab">Spectrum &amp; Filter</button>
+          <button id="tabFk" class="tab">f&ndash;k</button>
         </div>
         <div id="commonShotView">
           <p class="ttl">Common shot gathers</p>
@@ -407,6 +411,31 @@
           <canvas id="spectrumCanvas" class="selected-gather" width="1100" height="420" aria-label="Mean amplitude spectrum and bandpass response"></canvas>
           <div class="hint" id="spectrumInfo">Acquire shots to see an amplitude spectrum.</div>
           <div class="note">The bandpass is zero phase and applied when the trace database is built, so the CMP gathers, semblance, NMO and the final stack all see filtered data. Raw samples are retained for this comparison.</div>
+        </div>
+        <div id="fkView" style="display:none">
+          <div class="toolbar">
+            <label>Fan filter <select id="fkMode">
+              <option value="off">off — transform only</option>
+              <option value="reject">reject slower than</option>
+              <option value="pass">keep only slower than</option>
+            </select></label>
+            <label>Apparent velocity <input type="number" id="fkVelocity" value="2000" min="200" max="9000" step="100" style="width:80px"> m/s</label>
+            <label>Taper <select id="fkTaper"><option value="0.1">10%</option><option value="0.25" selected>25%</option><option value="0.5">50%</option></select></label>
+            <label>Panel <select id="fkView2"><option value="before">before filter</option><option value="after">after filter</option></select></label>
+          </div>
+          <div class="fk-pair">
+            <div>
+              <p class="ttl sub">f&ndash;k amplitude</p>
+              <canvas id="fkCanvas" width="720" height="420" aria-label="Frequency-wavenumber amplitude spectrum of the selected shot gather"></canvas>
+            </div>
+            <div>
+              <p class="ttl sub">Shot gather</p>
+              <canvas id="fkGather" width="720" height="420" aria-label="Selected shot gather, before or after the f-k fan filter"></canvas>
+            </div>
+          </div>
+          <div class="hint" id="fkInfo">Acquire shots to see an f&ndash;k spectrum.</div>
+          <div class="note">Frequency down, wavenumber across. A straight event with apparent velocity v sits along the line f = v k, so dip becomes position: flat events stack up the k = 0 axis and the steep direct arrival fans out to the sides. The fan keeps or rejects everything below a chosen apparent velocity, which is how linear noise is separated from reflections without touching their frequency content. Both panels here are built from the gain-only gather with the fan applied or not, so the <b>before</b>/<b>after</b> switch isolates the fan and nothing else — the fan itself runs when the trace database is built, so the CMP gathers, semblance, NMO and the stack all see filtered data.</div>
+          <div class="note warning"><b>What it does, measured.</b> On a synthetic gather holding one flat event and one dipping at 1500 m/s, rejecting below 3000 m/s leaves under 15% of the dipping event and over 60% of the flat one, and the complement does the reverse — both are self-tested. On a real 48-trace land gather over a flat model the same operator is less surgical: rejecting below 2600 m/s takes the direct-arrival window from 14800 to 8159 RMS while the flat reflection moves 5151 → 5183, and keeping only the slow side takes the reflection to 436 while leaving the direct arrival at 14210. So it separates by dip cleanly, but a window drawn along the direct arrival also contains reflection energy at short offset, where the two share a dip and nothing keyed on dip can tell them apart.</div><div class="note warning"><b>Two limits.</b> <b>Spatial aliasing:</b> above f = v·k<sub>Nyquist</sub> an event steeper than two traces per period wraps around the edge and reappears with the opposite dip, where no filter can distinguish it from real energy. At 20 m spacing a 1600 m/s arrival aliases above 40 Hz, and band-limiting below that before filtering improves the direct-arrival removal from 45% to 53% — so aliasing accounts for part of what survives, not most of it. <b>Edge taper:</b> 48 traces zero-padded to 64 would ring in wavenumber, so the gather is tapered across traces first, and the outermost traces are therefore treated less faithfully than the middle of the spread.</div>
         </div>
       </div>
     </section>
@@ -1015,6 +1044,7 @@ let dataVersion=0;
 function buildTraceDatabase(){
   acquisitionTraces=[];dataVersion++;cvsCache=null;
   shotRecords.forEach(shot=>{
+  const gatherInput=shotGatherInput(shot);
   const deconDesign=designDeconForShot(shot);
   shot.receivers.forEach((receiver,k)=>{
     const sourceX=shot.sourceX, receiverX=receiver.x;
@@ -1029,7 +1059,7 @@ function buildTraceDatabase(){
     // stationary wavelet, and spreading is the largest non-stationarity there
     // is. `shotInputTraces` is what designDeconForShot sees too, so the
     // operator is always designed on the data it is applied to.
-    const input=shotInputTraces(shot,k);
+    const input=gatherInput[k];
     const raw=input.clean,noiseRaw=input.noise;
     const deconvolve=trace=>deconDesign?applyPredictionErrorFilter(trace,deconDesign.operator,deconDesign.lag):trace;
     const cleanDecon=deconvolve(raw),noiseDecon=noiseRaw?deconvolve(noiseRaw):null;
@@ -1884,6 +1914,161 @@ function gainModeLabel(mode=gainMode){
     :mode==='agc'?`AGC · ${agcWindowMs} ms window`:'none';
 }
 
+/* ---------------- f-k transform and fan filter ----------------
+
+   Dip is hard to act on in the time-offset domain and trivial in
+   frequency-wavenumber: a straight event with apparent velocity v is a line
+   f = v k, so every dip gets its own direction from the origin. Flat events
+   pile up on the k = 0 axis, the direct arrival fans out to the sides, and a
+   filter that keeps or rejects a range of dips is a wedge through the origin.
+
+   Two honest limits, both surfaced in the panel rather than buried here.
+   SPATIAL ALIASING: the transform can only represent up to k = 1/(2 dx), so an
+   event steeper than two traces per period wraps to the opposite dip and is
+   then indistinguishable from real energy there. TAPER: a 48-trace gather
+   padded to 64 would ring in wavenumber, so the gather is tapered across
+   traces first -- which means the outermost traces are attenuated inside the
+   transform and the filter treats them less faithfully than the middle. */
+let fkMode='off',fkVelocity=2000,fkTaper=.25;
+const FK_EDGE_TRACES=.12;          // cosine taper over the outer 12% of the spread
+
+/* Cosine taper across the spread, so the wavenumber transform sees a gather
+   that goes smoothly to zero at both ends instead of a step. */
+function fkSpatialTaper(count){
+  const w=new Float64Array(count),edge=Math.max(1,Math.round(count*FK_EDGE_TRACES));
+  for(let n=0;n<count;n++){
+    const d=Math.min(n,count-1-n);
+    w[n]=d>=edge?1:.5*(1-Math.cos(Math.PI*(d+.5)/edge));
+  }
+  return w;
+}
+
+/* Forward 2D transform: FFT in time down each trace, then FFT across traces at
+   each frequency. Returns the full complex spectrum plus the axes, because both
+   the display and the filter need them. */
+function fkTransform(traces,dt,dx){
+  const count=traces.length;
+  if(count<4)return null;
+  const nt=Math.min(...traces.map(t=>t.length));
+  if(!(nt>8))return null;
+  const nf=nextPow2(nt),nk=nextPow2(count*2);
+  const taper=fkSpatialTaper(count);
+  // time transform, one trace at a time, into a [k][f] complex plane
+  const re=new Float64Array(nk*nf),im=new Float64Array(nk*nf);
+  const tr=new Float64Array(nf),ti=new Float64Array(nf);
+  for(let n=0;n<count;n++){
+    tr.fill(0);ti.fill(0);
+    const trace=traces[n],w=taper[n];
+    for(let i=0;i<nt;i++)tr[i]=trace[i]*w;
+    fftRadix2(tr,ti,false);
+    for(let k=0;k<nf;k++){re[n*nf+k]=tr[k];im[n*nf+k]=ti[k];}
+  }
+  // wavenumber transform across traces, at each frequency
+  const sr=new Float64Array(nk),si=new Float64Array(nk);
+  for(let k=0;k<nf;k++){
+    for(let n=0;n<nk;n++){
+      const at=n<count?n*nf+k:-1;
+      sr[n]=at>=0?re[at]:0;si[n]=at>=0?im[at]:0;
+    }
+    fftRadix2(sr,si,false);
+    for(let n=0;n<nk;n++){re[n*nf+k]=sr[n];im[n*nf+k]=si[n];}
+  }
+  return {re,im,nf,nk,nt,count,dt,dx,df:1/(nf*dt),dk:1/(nk*dx)};
+}
+
+/* The fan weight for one bin. `u` is the wavenumber measured against the
+   wavenumber the cut velocity would have at this frequency, so u > 1 means the
+   bin is dipping steeper than the cut -- apparent velocity below it. */
+function fkFanWeight(f,k,velocity,taper,mode){
+  if(mode==='off')return 1;
+  const u=f>0?Math.abs(k)*velocity/f:(Math.abs(k)>0?Infinity:0);
+  const lo=1-taper,hi=1+taper;
+  let keepFast;
+  if(u<=lo)keepFast=1;
+  else if(u>=hi)keepFast=0;
+  else keepFast=.5*(1+Math.cos(Math.PI*(u-lo)/(hi-lo)));
+  return mode==='reject'?keepFast:1-keepFast;
+}
+
+/* Inverse transform with the fan applied. The taper is divided back out so the
+   returned gather is the input gather with the fan removed, not the input
+   gather with a spatial taper baked into it -- except at the very edges, where
+   dividing by a small weight would amplify whatever the transform left there,
+   so the outer traces are left tapered and the panel says so. */
+function fkFilterGather(traces,dt,dx,mode=fkMode,velocity=fkVelocity,taper=fkTaper){
+  if(mode==='off')return traces;
+  const spectrum=fkTransform(traces,dt,dx);
+  if(!spectrum)return traces;
+  const {re,im,nf,nk,nt,count,df,dk}=spectrum;
+  for(let n=0;n<nk;n++){
+    const signedK=(n<=nk/2?n:n-nk)*dk;
+    for(let k=0;k<nf;k++){
+      const signedF=(k<=nf/2?k:k-nf)*df;
+      const w=fkFanWeight(Math.abs(signedF),signedK,velocity,taper,mode);
+      if(w===1)continue;
+      re[n*nf+k]*=w;im[n*nf+k]*=w;
+    }
+  }
+  // back to x-t: inverse across traces, then inverse in time
+  const sr=new Float64Array(nk),si=new Float64Array(nk);
+  for(let k=0;k<nf;k++){
+    for(let n=0;n<nk;n++){sr[n]=re[n*nf+k];si[n]=im[n*nf+k];}
+    fftRadix2(sr,si,true);
+    for(let n=0;n<nk;n++){re[n*nf+k]=sr[n];im[n*nf+k]=si[n];}
+  }
+  const spatial=fkSpatialTaper(count),floor=.15;
+  const tr=new Float64Array(nf),ti=new Float64Array(nf);
+  return traces.map((trace,n)=>{
+    for(let k=0;k<nf;k++){tr[k]=re[n*nf+k];ti[k]=im[n*nf+k];}
+    fftRadix2(tr,ti,true);
+    const out=new Float32Array(trace.length);
+    const undo=1/Math.max(floor,spatial[n]);
+    for(let i=0;i<nt;i++)out[i]=tr[i]*undo;
+    return out;
+  });
+}
+
+/* The whole shot gather as processing sees it: gain first, then the f-k fan.
+   The fan is a gather-level operation, so it cannot live in shotInputTraces --
+   and putting it here rather than in the database loop is what lets the
+   deconvolution design read exactly the traces the operator will be applied to,
+   which is the invariant the decon code depends on. Cached per shot against
+   every setting that can change the answer. */
+function shotReceiverSpacing(shot){
+  const xs=shot.receivers.map(r=>r.x).slice().sort((a,b)=>a-b),gaps=[];
+  for(let n=1;n<xs.length;n++)gaps.push(Math.abs(xs[n]-xs[n-1]));
+  if(!gaps.length)return DX;
+  gaps.sort((a,b)=>a-b);
+  return Math.max(DX,gaps[Math.floor(gaps.length/2)]);
+}
+
+function shotGatherInput(shot){
+  const key=`${qFactor}|${gainMode}|${agcWindowMs}|${noiseLevel}|${fkMode}|${fkVelocity}|${fkTaper}`;
+  if(shot._gatherCache&&shot._gatherCache.key===key)return shot._gatherCache.value;
+  const parts=shot.receivers.map((_,k)=>shotInputTraces(shot,k));
+  const hasNoise=parts.some(part=>part.noise);
+  let value=parts.map(part=>({clean:part.clean,noise:part.noise,gain:part.gain}));
+  if(fkMode!=='off'&&parts.length>=4){
+    /* The transform is over POSITION, so the traces have to go in in spatial
+       order however the receivers happen to be listed, and come back out in the
+       order the rest of the page indexes them by. */
+    const order=shot.receivers.map((receiver,k)=>({k,x:receiver.x})).sort((a,b)=>a.x-b.x);
+    const dx=shotReceiverSpacing(shot);
+    const cleanIn=order.map(e=>parts[e.k].clean);
+    const cleanOut=fkFilterGather(cleanIn,shot.dt,dx);
+    let noiseOut=null;
+    if(hasNoise){
+      const noiseIn=order.map(e=>parts[e.k].noise||new Float32Array(shot.nt));
+      noiseOut=fkFilterGather(noiseIn,shot.dt,dx);
+    }
+    order.forEach((entry,n)=>{
+      value[entry.k]={clean:cleanOut[n],noise:noiseOut?noiseOut[n]:parts[entry.k].noise,gain:parts[entry.k].gain};
+    });
+  }
+  shot._gatherCache={key,value};
+  return value;
+}
+
 /* ---------------- deconvolution ---------------- */
 /* Multiples are generated by the free surface and can be switched off at the
    boundary, but switching them off is not processing. Predictive deconvolution
@@ -1981,8 +2166,9 @@ function designDeconForShot(shot){
   if(maxLag>=shot.nt)return null;
   const stride=Math.max(1,Math.floor(shot.traces.length/12));
   let sum=null,used=0;
+  const gather=shotGatherInput(shot);
   for(let k=0;k<shot.traces.length;k+=stride){
-    const input=shotInputTraces(shot,k);
+    const input=gather[k];
     let design=input.clean;
     if(input.noise){
       design=new Float32Array(shot.nt);
@@ -2208,6 +2394,165 @@ function meanSpectrum(records,key){
   if(!sum)return null;
   for(let k=0;k<sum.length;k++)sum[k]/=records.length;
   return {amp:sum,df};
+}
+
+/* ---------------- f-k panel ---------------- */
+/* The selected shot in spatial order, with the fan applied here rather than
+   read back from the database.
+
+   Reading the database would make the "before" panel useless: the fan runs
+   while the database is built, so `samples` AND `rawSamples` are both already
+   filtered and the two views would be identical. Filtering here, from the
+   gain-only gather, is what lets the selector isolate the fan and nothing
+   else -- the same input through the same operator, on and off. */
+function fkSelectedGather(applyFan){
+  const shot=shotRecords.find(r=>r.id===selectedShotId)||shotRecords[shotRecords.length-1];
+  if(!shot||shot.receivers.length<4)return null;
+  const order=shot.receivers.map((receiver,k)=>({k,x:receiver.x})).sort((a,b)=>a.x-b.x);
+  const gaps=[];
+  for(let n=1;n<order.length;n++)gaps.push(Math.abs(order[n].x-order[n-1].x));
+  gaps.sort((a,b)=>a-b);
+  const dx=gaps.length?Math.max(DX,gaps[Math.floor(gaps.length/2)]):DX;
+  let traces=order.map(entry=>shotInputTraces(shot,entry.k).clean);
+  const mode=document.getElementById('fkMode').value;
+  if(applyFan&&mode!=='off')traces=fkFilterGather(traces,shot.dt,dx,mode,fkVelocity,fkTaper);
+  return {shot,dx,dt:shot.dt,traces,xs:order.map(e=>e.x)};
+}
+
+function drawFkPanel(){
+  const cv=document.getElementById('fkCanvas');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const L=58,R=14,T=18,B=36,pw=W-L-R,ph=H-T-B,info=document.getElementById('fkInfo');
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  const which=document.getElementById('fkView2').value;
+  const gather=fkSelectedGather(which==='after');
+  if(!gather){
+    ctx.fillStyle='#8a949f';ctx.fillText('Acquire shots to see an f–k spectrum.',L,T+20);
+    if(info)info.textContent='No shot gather yet.';
+    return;
+  }
+  const spectrum=fkTransform(gather.traces,gather.dt,gather.dx);
+  if(!spectrum){ctx.fillStyle='#8a949f';ctx.fillText('Need at least four traces.',L,T+20);return;}
+  const {re,im,nf,nk,df,dk}=spectrum;
+  const kNyquist=1/(2*gather.dx),fNyquist=1/(2*gather.dt);
+  const fMax=Math.min(fNyquist,Math.max(90,f0*3.5));
+  const fBins=Math.max(2,Math.round(fMax/df));
+  // decibel image, clipped against the panel's own maximum
+  let peak=1e-12;
+  for(let n=0;n<nk;n++)for(let k=1;k<fBins;k++){
+    const at=n*nf+k,a=Math.hypot(re[at],im[at]);
+    if(a>peak)peak=a;
+  }
+  const img=ctx.createImageData(Math.round(pw),Math.round(ph));
+  const RANGE=60;                                  // dB shown
+  for(let py=0;py<img.height;py++){
+    const k=Math.max(1,Math.min(fBins-1,Math.round(py/img.height*fBins)));
+    for(let px=0;px<img.width;px++){
+      const kIndexSigned=Math.round((px/(img.width-1)-.5)*nk);
+      const n=(kIndexSigned+nk)%nk,at=n*nf+k;
+      const db=20*Math.log10(Math.hypot(re[at],im[at])/peak);
+      const u=Math.max(0,Math.min(1,(db+RANGE)/RANGE));
+      const o=(py*img.width+px)*4;
+      // dark blue through amber, so weak energy stays visible against the floor
+      img.data[o]=Math.round(20+u*u*235);
+      img.data[o+1]=Math.round(24+Math.pow(u,1.4)*196);
+      img.data[o+2]=Math.round(34+Math.pow(u,3)*53);
+      img.data[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,L,T);
+
+  const xOfK=k=>L+(k/(2*kNyquist)+.5)*pw;
+  const yOfF=f=>T+Math.max(0,Math.min(1,f/(fBins*df)))*ph;
+  // the fan cut, and the aliasing limit
+  const mode=document.getElementById('fkMode').value;
+  if(mode!=='off'){
+    ctx.strokeStyle='rgba(255,90,90,.9)';ctx.lineWidth=1.3;ctx.setLineDash([5,4]);
+    [-1,1].forEach(sign=>{
+      ctx.beginPath();
+      ctx.moveTo(xOfK(0),yOfF(0));
+      const fTop=fBins*df,kAt=sign*fTop/fkVelocity;
+      ctx.lineTo(xOfK(Math.max(-kNyquist,Math.min(kNyquist,kAt))),
+        yOfF(Math.min(fTop,Math.abs(kNyquist*fkVelocity))));
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    ctx.fillStyle='#ff9b9b';
+    ctx.fillText(`${mode==='reject'?'reject':'keep'} below ${fkVelocity} m/s`,L+8,T+ph-10);
+  }
+  const fAlias=kNyquist*fkVelocity;
+  if(fAlias<fBins*df){
+    ctx.strokeStyle='rgba(126,231,255,.75)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(L,yOfF(fAlias));ctx.lineTo(L+pw,yOfF(fAlias));ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#7ee7ff';
+    ctx.fillText(`a ${fkVelocity} m/s dip aliases above ${fAlias.toFixed(0)} Hz`,L+8,yOfF(fAlias)-4);
+  }
+  // axes
+  ctx.strokeStyle='rgba(35,42,51,.8)';ctx.fillStyle='#a0abb6';
+  for(let f=0;f<=fBins*df;f+=20){
+    const y=yOfF(f);
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText(`${f.toFixed(0)} Hz`,6,y+3);
+  }
+  for(let q=0;q<=4;q++){
+    const k=-kNyquist+q/4*2*kNyquist,x=xOfK(k);
+    ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+ph);ctx.stroke();
+    ctx.textAlign='center';ctx.fillText(k.toFixed(3),x,H-20);ctx.textAlign='left';
+  }
+  ctx.fillStyle='#8a949f';
+  ctx.textAlign='center';ctx.fillText('wavenumber (cycles/m) →',L+pw/2,H-6);ctx.textAlign='left';
+  if(info){
+    info.textContent=`Shot S${gather.shot.id} · ${gather.traces.length} traces at ${gather.dx.toFixed(0)} m · `+
+      `wavenumber Nyquist ${kNyquist.toFixed(4)} cycles/m · frequency Nyquist ${fNyquist.toFixed(0)} Hz · `+
+      `${RANGE} dB shown · panel = gain only, fan ${which==='after'?'applied':'not applied'}`+
+      (mode==='off'?' · fan off':` · fan ${mode} below ${fkVelocity} m/s, ${Math.round(fkTaper*100)}% taper`);
+  }
+}
+
+/* The same gather as a picture, so the effect of the fan is visible next to the
+   spectrum that produced it rather than only in decibels. */
+function drawFkGather(){
+  const cv=document.getElementById('fkGather');
+  if(!cv)return;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const L=52,R=12,T=18,B=30,pw=W-L-R,ph=H-T-B;
+  ctx.fillStyle='#0b0e12';ctx.fillRect(0,0,W,H);
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';
+  const which=document.getElementById('fkView2').value;
+  const gather=fkSelectedGather(which==='after');
+  if(!gather){ctx.fillStyle='#8a949f';ctx.fillText('Acquire shots first.',L,T+20);return;}
+  const traces=gather.traces,nt=Math.min(...traces.map(t=>t.length)),count=traces.length;
+  const sample=[];
+  traces.forEach(t=>{for(let i=0;i<nt;i+=5)sample.push(Math.abs(t[i]));});
+  sample.sort((a,b)=>a-b);
+  const clip=Math.max(1e-12,sample[Math.floor((sample.length-1)*.99)]);
+  const img=ctx.createImageData(Math.round(pw),Math.round(ph));
+  for(let py=0;py<img.height;py++){
+    const i0=Math.min(nt-1,Math.floor(py/img.height*nt)),i1=Math.max(i0+1,Math.min(nt,Math.floor((py+1)/img.height*nt)));
+    for(let px=0;px<img.width;px++){
+      const n=Math.min(count-1,Math.floor(px/img.width*count));
+      let best=0;
+      for(let i=i0;i<i1;i++){const v=traces[n][i];if(Math.abs(v)>Math.abs(best))best=v;}
+      const u=Math.max(-1,Math.min(1,best/clip));
+      const g=Math.round(u>=0?118+u*137:118+u*110);
+      const o=(py*img.width+px)*4;
+      img.data[o]=img.data[o+1]=img.data[o+2]=g;img.data[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,L,T);
+  ctx.strokeStyle='rgba(35,42,51,.8)';ctx.fillStyle='#a0abb6';
+  const tMax=nt*gather.dt;
+  for(let t=0;t<=tMax;t+=.2){
+    const y=T+t/tMax*ph;
+    ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();
+    ctx.fillText(`${t.toFixed(1)} s`,6,y+3);
+  }
+  ctx.fillText(`${Math.round(gather.xs[0])} m`,L,H-8);
+  const far=`${Math.round(gather.xs[count-1])} m`;
+  ctx.fillText(far,L+pw-ctx.measureText(far).width,H-8);
 }
 
 function drawSpectrum(){
@@ -4678,7 +5023,7 @@ function collectSessionState(){
       seabedKnees:seabedKnees.map(knee=>({x:knee.x,z:knee.z}))},
     processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),
       pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
-      noiseLevel,qFactor,velocitySource,vnmo,stretchLimit,
+      noiseLevel,qFactor,fkMode,fkVelocity,fkTaper,velocitySource,vnmo,stretchLimit,
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
@@ -4761,6 +5106,9 @@ function applySessionState(state){
   });
   noiseLevel=clampNumber(proc.noiseLevel,noiseLevel,0,2);
   qFactor=Q_CHOICES.includes(+proc.qFactor)?+proc.qFactor:qFactor;
+  if(['off','reject','pass'].includes(proc.fkMode))fkMode=proc.fkMode;
+  fkVelocity=clampNumber(proc.fkVelocity,fkVelocity,200,9000);
+  fkTaper=clampNumber(proc.fkTaper,fkTaper,.05,.8);
   velocitySource=pickFrom(proc.velocitySource,['constant','manual','model'],velocitySource);
   vnmo=clampNumber(proc.vnmo,vnmo,1200,6000);
   stretchLimit=proc.stretchLimit===null?null:clampNumber(proc.stretchLimit,stretchLimit,0,4);
@@ -4809,6 +5157,7 @@ function syncControlsFromState(proc){
   set('vnmo',vnmo);set('nmoGain',nmoDisplayGain);set('migAperture',migrationAperture);
   set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);set('noiseLevel',Math.round(noiseLevel*100));
   set('qFactor',String(Math.max(0,Q_CHOICES.indexOf(qFactor))));document.getElementById('qLbl').textContent=qLabel();
+  set('fkMode',fkMode);set('fkVelocity',fkVelocity);set('fkTaper',String(fkTaper));
   set('stretchMute',stretchLimit===null?'off':String(stretchLimit));
   [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
   if(proc&&proc.minFold)set('minFold',proc.minFold);
@@ -5365,6 +5714,26 @@ document.getElementById('qFactor').onchange=()=>{
     ?`Constant Q = ${qFactor} applied to the recorded traces`
     :'Attenuation removed');
 };
+/* The fan is applied when the trace database is built, so changing it re-runs
+   the sequence for every shot -- the CMP gathers, semblance, NMO and the stack
+   all see filtered data without knowing a fan exists. */
+function fkSettingsChanged(rebuild){
+  fkMode=document.getElementById('fkMode').value;
+  fkVelocity=Math.max(200,Math.min(9000,+document.getElementById('fkVelocity').value||2000));
+  document.getElementById('fkVelocity').value=fkVelocity;
+  fkTaper=+document.getElementById('fkTaper').value||.25;
+  shotRecords.forEach(shot=>{shot._gatherCache=null;});
+  if(rebuild&&shotRecords.length){
+    rebuildFilteredDatabase(fkMode==='off'
+      ?'f–k fan filter off'
+      :`f–k fan ${fkMode==='reject'?'rejecting':'keeping only'} apparent velocities below ${fkVelocity} m/s`);
+  }
+  drawFkPanel();drawFkGather();
+}
+document.getElementById('fkMode').onchange=()=>fkSettingsChanged(true);
+document.getElementById('fkVelocity').onchange=()=>fkSettingsChanged(true);
+document.getElementById('fkTaper').onchange=()=>fkSettingsChanged(true);
+document.getElementById('fkView2').onchange=()=>{drawFkPanel();drawFkGather();};
 document.getElementById('sessionSave').onclick=saveSessionToStorage;
 document.getElementById('sessionRestore').onclick=restoreSessionFromStorage;
 document.getElementById('sessionExport').onclick=exportSessionFile;
@@ -5514,8 +5883,8 @@ function setStage(stage){
 }
 document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>setStage(b.dataset.stage));
 function setAcquisitionSubtab(which){
-  const views={shot:'commonShotView',receiver:'commonReceiverView',offset:'offsetView',gain:'gainView',decon:'deconView',spectrum:'spectrumView'};
-  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',offset:'tabOffset',gain:'tabGain',decon:'tabDecon',spectrum:'tabSpectrum'};
+  const views={shot:'commonShotView',receiver:'commonReceiverView',offset:'offsetView',gain:'gainView',decon:'deconView',spectrum:'spectrumView',fk:'fkView'};
+  const tabs={shot:'tabCommonShot',receiver:'tabCommonReceiver',offset:'tabOffset',gain:'tabGain',decon:'tabDecon',spectrum:'tabSpectrum',fk:'tabFk'};
   Object.entries(views).forEach(([key,id])=>{document.getElementById(id).style.display=key===which?'':'none';});
   Object.entries(tabs).forEach(([key,id])=>{document.getElementById(id).classList.toggle('on',key===which);});
   if(which==='receiver')drawAcquisitionViews();
@@ -5523,6 +5892,7 @@ function setAcquisitionSubtab(which){
   if(which==='gain')drawGainPanel();
   if(which==='decon')drawDeconPanel();
   if(which==='spectrum')drawSpectrum();
+  if(which==='fk'){drawFkPanel();drawFkGather();}
 }
 document.getElementById('tabCommonShot').onclick=()=>setAcquisitionSubtab('shot');
 document.getElementById('tabCommonReceiver').onclick=()=>setAcquisitionSubtab('receiver');
@@ -5530,6 +5900,7 @@ document.getElementById('tabOffset').onclick=()=>setAcquisitionSubtab('offset');
 document.getElementById('tabGain').onclick=()=>setAcquisitionSubtab('gain');
 document.getElementById('tabDecon').onclick=()=>setAcquisitionSubtab('decon');
 document.getElementById('tabSpectrum').onclick=()=>setAcquisitionSubtab('spectrum');
+document.getElementById('tabFk').onclick=()=>setAcquisitionSubtab('fk');
 
 /* ---------------- gain panel ---------------- */
 /* Mean trace RMS against time, in decibels. Averaged over the whole shot so a
@@ -6991,6 +7362,96 @@ function runNumericalChecks(){
     }
     results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
       pass:worst<.02});
+  }
+
+  // --- f-k transform and fan filter ----------------------------------------
+  /* A synthetic gather with one flat event and one dipping at a known apparent
+     velocity. Three things follow that the panel and the filter both depend on:
+     the dipping event lands on the line f = v k in the transform, the fan
+     removes it when the cut is set above its velocity, and the flat event
+     survives. A pass-through case checks the inverse transform separately from
+     the fan, so a reconstruction bug cannot hide behind a filtering one. */
+  {
+    const dt=.002,nt=512,count=32,dx=20,dip=1500,fw=20;
+    const wavelet=(out,centre,amplitude)=>{
+      for(let k=-40;k<=40;k++){
+        const a=Math.PI*fw*(k*dt),a2=a*a,i=centre+k;
+        if(i>=0&&i<nt&&a2<50)out[i]+=amplitude*(1-2*a2)*Math.exp(-a2);
+      }
+    };
+    const flatTime=.30,dipTime=.55;
+    const build=()=>Array.from({length:count},(_,n)=>{
+      const trace=new Float32Array(nt);
+      wavelet(trace,Math.round(flatTime/dt),1);
+      wavelet(trace,Math.round((dipTime+n*dx/dip)/dt),1);
+      return trace;
+    });
+    const energyNear=(trace,t)=>{
+      const centre=Math.round(t/dt),half=Math.round((1.2/fw)/dt);
+      let sum=0;
+      for(let i=Math.max(0,centre-half);i<=Math.min(nt-1,centre+half);i++)sum+=trace[i]*trace[i];
+      return sum;
+    };
+    const middle=Math.floor(count/2);
+    const input=build();
+    const flatIn=energyNear(input[middle],flatTime);
+    const dipIn=energyNear(input[middle],dipTime+middle*dx/dip);
+
+    // 1. the dipping event sits on f = v k
+    {
+      const spectrum=fkTransform(input,dt,dx);
+      const {re,im,nf,nk,df,dk}=spectrum;
+      // strongest bin away from the k = 0 column, which the flat event owns
+      let best=0,bestF=0,bestK=0;
+      for(let n=0;n<nk;n++){
+        const signedK=(n<=nk/2?n:n-nk)*dk;
+        if(Math.abs(signedK)<2*dk)continue;
+        for(let k=1;k<nf/2;k++){
+          const f=k*df;
+          if(f<8||f>34)continue;                    // below this gather's alias limit
+          const a=Math.hypot(re[n*nf+k],im[n*nf+k]);
+          if(a>best){best=a;bestF=f;bestK=signedK;}
+        }
+      }
+      const apparent=bestK!==0?Math.abs(bestF/bestK):Infinity;
+      results.push({test:'a dipping event lands on f = v k in the transform',
+        pass:Number.isFinite(apparent)&&Math.abs(apparent-dip)/dip<.15});
+    }
+
+    // 2. the fan removes it, and leaves the flat event standing
+    {
+      const cleaned=fkFilterGather(build(),dt,dx,'reject',3000,.25);
+      const flatOut=energyNear(cleaned[middle],flatTime);
+      const dipOut=energyNear(cleaned[middle],dipTime+middle*dx/dip);
+      results.push({test:'the f-k fan rejects the dipping event',pass:dipOut<.15*dipIn});
+      results.push({test:'the f-k fan keeps the flat event',pass:flatOut>.6*flatIn});
+    }
+
+    // 3. keeping only the slow side is the complement, not a second filter
+    {
+      const kept=fkFilterGather(build(),dt,dx,'pass',3000,.25);
+      const flatOut=energyNear(kept[middle],flatTime);
+      const dipOut=energyNear(kept[middle],dipTime+middle*dx/dip);
+      results.push({test:'the f-k fan can keep the dip and drop the flat event',
+        pass:dipOut>.4*dipIn&&flatOut<.25*flatIn});
+    }
+
+    // 4. a cut below everything present must reconstruct the gather
+    {
+      const through=fkFilterGather(build(),dt,dx,'reject',60,.1);
+      let worst=0,peak=1e-12;
+      for(let n=4;n<count-4;n++)for(let i=0;i<nt;i++){
+        peak=Math.max(peak,Math.abs(input[n][i]));
+        worst=Math.max(worst,Math.abs(through[n][i]-input[n][i]));
+      }
+      results.push({test:'the f-k inverse rebuilds a gather nothing was cut from',pass:worst/peak<.05});
+    }
+
+    // 5. off is a pass-through of the array itself, not a rebuilt copy
+    {
+      const same=build();
+      results.push({test:'the f-k fan off is a pass-through',pass:fkFilterGather(same,dt,dx,'off')===same});
+    }
   }
 
   // --- attenuation ---------------------------------------------------------

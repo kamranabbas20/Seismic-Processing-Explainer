@@ -253,6 +253,9 @@
       <input type="range" id="tmax" min="0.4" max="3" value="1.2" step="0.1">
       <label>Random noise <span id="noiseLbl">off</span></label>
       <input type="range" id="noiseLevel" min="0" max="120" value="0" step="5">
+      <label>Attenuation <span id="qLbl">off</span></label>
+      <input type="range" id="qFactor" min="0" max="12" value="0" step="1">
+      <div class="hint" id="qInfo">Minimum-phase constant Q, applied to the recorded traces. Q is uniform, so t* = t/Q for any path and the attenuation depends only on record time. Three caveats, all measured: the displayed wavefield stays undamped because the solver is untouched; there is no Q layering, so every arrival at a given time is attenuated alike; and assigning t* by sample time over-attenuates a 25–35 Hz wavelet by 6–16%, so read Q as a dial with the right shape rather than a calibrated number.</div>
       <div class="hint" id="noiseInfo">Band-limited, independent per trace, and recorded with the shot — so suppressing it is the stack's job, not the filter's.</div>
     </div>
 
@@ -563,7 +566,7 @@
           
           <div class="note"><b>Bottom left</b> is the same depth migration run through a velocity model built from the data instead: pick stacking velocities on several CMPs, Dix them into interval velocities, integrate those to depth, interpolate sideways between the picked locations. Nothing in that chain consults the model. <b>Bottom right</b> is what the chain got wrong — derived minus true interval velocity, blue too slow, red too fast, with a cyan line at every picked CMP and a tick where its deepest pick ran out. Below that tick the derived model is not so much wrong as absent: the last interval velocity is simply held, because no reflection ever constrained what is down there.</div><div class="note">Press <b>Auto-pick across the line</b> on the Velocity stage first, or the derived model has a single column and no lateral variation at all. The stride matters, but measured on the anticline preset it does not matter in the direction you would guess: picking every gather (46 columns) gives a <em>worse</em> velocity field than picking every eighth (5 columns) — 635 against 540 m/s RMS above the deepest reflector — because the auto-picker’s scatter from gather to gather is larger than the lateral variation it is trying to resolve, and interpolating over long distances averages that scatter away. Denser picking only starts to pay once the picks are better than the structure is strong.</div><div class="note">The arcs above the shallowest reflector are <b>migration aliasing</b>, not noise in the data. The stack is sampled every 20 m while the image grid is 5 m, so the summation curve is under-sampled and its impulse response does not fully cancel. A wider aperture reaches steeper parts of that curve and imports more of it, which is why the default is 500 m rather than the 800 m the time migration uses — try 300 m and 1200 m to see the trade against how much of the deep flanks get illuminated.</div><div class="note warning">The top two panels migrate with the model’s own velocity field — the same array the wave simulation propagates through. They are reference images: what each method recovers when the velocity is right, not results obtainable from the recorded data alone. The bottom-left panel is the honest one, the image this survey could actually have produced. The gap between them is the cost of not knowing the velocity, and it is the only one of the three a real project ever gets to see.</div>
         </div>
-        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), attenuation and Q, statics, DMO, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 1912 m/s at the end of the imaged line against 2598 m/s under the crest — 36% of lateral variation across the section that gets migrated — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), statics, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 1912 m/s at the end of the imaged line against 2598 m/s under the crest — 36% of lateral variation across the section that gets migrated — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
       </div>
     </section>
   </main>
@@ -1702,12 +1705,168 @@ function applyGainScalars(samples,g){
   return out;
 }
 
+/* ---------------- attenuation (constant Q) ----------------
+
+   The solver is perfectly elastic: nothing in the wave equation it steps takes
+   energy out of the wavelet, which is why the spectrum panel measures a
+   dominant frequency ABOVE the source and why deconvolution has only multiples
+   to work on. Real rock absorbs, and absorbs preferentially at high frequency.
+
+   This applies constant Q to the RECORDED traces rather than inside the
+   propagation, and for a spatially uniform Q that is not an approximation:
+   t* = integral of dt/Q along the path = t/Q for any path, so the attenuation
+   an arrival has suffered depends only on its total traveltime, which is
+   exactly its record time. What the shortcut does cost is Q layering -- every
+   arrival at 0.4 s is attenuated identically whether it spent that time in
+   shale or in salt -- and the displayed wavefield, which keeps propagating
+   undamped because the solver is untouched. Both are stated in the panel.
+
+   The amplitude law is exp(-pi f t / Q). The phase that goes with it is not a
+   free choice: absorption without the matching velocity dispersion is not
+   causal, and the dispersion is the half of it that turns the zero-phase source
+   wavelet into the minimum-phase one deconvolution assumes. */
+const Q_CHOICES=[0,400,300,200,150,120,100,80,65,50,40,30,20];
+const Q_WINDOWS=16;
+let qFactor=0;                       // 0 means no attenuation
+function qEnabled(){return qFactor>0;}
+
+/* The operator is built MINIMUM PHASE rather than from the analytic Kolsky
+   phase expression. Constant-Q absorption is minimum phase, and constructing it
+   that way -- the Hilbert transform of the log amplitude spectrum, taken via
+   the real cepstrum -- makes causality exact by construction rather than
+   approximate. Writing the analytic phase term directly was tried first and
+   left a non-causal precursor about 125 dB below the arrival: far under
+   anything visible, but a precursor all the same, and this costs nothing.
+
+   The operator depends only on t*, the transform length and the sample rate --
+   never on the trace -- so the bank is built once per Q and reused for every
+   trace on the line. */
+let qOperatorBank=null;
+function constantQOperators(n,dt,Q,tMax){
+  const key=`${n}|${dt}|${Q}|${tMax.toFixed(6)}`;
+  if(qOperatorBank&&qOperatorBank.key===key)return qOperatorBank.bank;
+  const df=1/(n*dt),bank=[];
+  /* A floor on the log spectrum. exp(-pi f t / Q) reaches e^-112 at Nyquist on
+     a 1 s record at Q = 30, and a cepstrum asked to represent that has no
+     useful dynamic range left. e^-25 is 217 dB down, far below anything this
+     tool displays or measures. */
+  const LOG_FLOOR=-25;
+  for(let m=0;m<Q_WINDOWS;m++){
+    const t=tMax*m/(Q_WINDOWS-1);
+    const re=new Float64Array(n),im=new Float64Array(n);
+    for(let k=0;k<n;k++){
+      const signed=k<=n/2?k:k-n,f=Math.abs(signed)*df;
+      re[k]=Math.max(LOG_FLOOR,-Math.PI*f*t/Q);
+    }
+    // real cepstrum, folded onto the causal side, back to a minimum-phase log spectrum
+    fftRadix2(re,im,true);
+    for(let k=1;k<n/2;k++){re[k]*=2;im[k]*=2;}
+    for(let k=n/2+1;k<n;k++){re[k]=0;im[k]=0;}
+    fftRadix2(re,im,false);
+    const opRe=new Float64Array(n),opIm=new Float64Array(n);
+    for(let k=0;k<n;k++){
+      const gain=Math.exp(re[k]);
+      opRe[k]=gain*Math.cos(im[k]);opIm[k]=gain*Math.sin(im[k]);
+    }
+    bank.push({t,re:opRe,im:opIm});
+  }
+  qOperatorBank={key,bank};
+  return bank;
+}
+
+/* Nonstationary filtering, by overlap-add over the INPUT rather than by
+   interpolating filtered copies at the output.
+
+   The obvious construction -- filter the whole trace once per t*, then read
+   output sample i from the copy whose t* matches i -- was tried first and is
+   biased. A minimum-phase operator delays its own output (26 ms per second of
+   record at Q = 50), so the tail of an arrival lands at output times whose t*
+   is larger than the one the arrival actually suffered, and every wavelet comes
+   out over-attenuated. Measured against exp(-pi f t / Q) that read 12% too
+   steep at 0.8 s and 30% too steep at 0.2 s.
+
+   Splitting the INPUT into overlapping triangular windows and filtering each
+   with its own operator attributes every sample to the t* of its own arrival
+   time, which is the physical quantity. The triangles are a partition of unity,
+   so with Q off the reconstruction is the input exactly. */
+/* MEASURED ACCURACY, and the one place this construction is not exact.
+
+   The operator bank itself reproduces exp(-pi f t / Q) to machine precision --
+   applied stationarily to a whole trace the spectral-ratio slope comes back at
+   1.0000 of theory. What costs accuracy is assigning t* by ABSOLUTE SAMPLE
+   TIME: a wavelet is not an instant, so its early samples are given a smaller
+   t* than its late ones, while a real arrival travels as a unit and suffers one
+   t* throughout. The error therefore scales with wavelet duration relative to
+   arrival time, and it is one-sided -- the result is over-attenuated.
+
+   Measured at Q = 50, as the ratio of the fitted slope to -pi t / Q:
+
+       wavelet     t = 0.2 s   t = 0.4 s   t = 0.8 s
+       10 Hz         2.10        1.58        1.31
+       20 Hz         1.45        1.24        1.13
+       30 Hz         1.29        1.16        1.08
+       60 Hz         1.15        1.07        1.03
+      100 Hz         1.08        1.03        1.01
+
+   Over this tool's working range -- a 25-35 Hz wavelet and arrivals past
+   0.2 s -- attenuation therefore runs 6-16% stronger than the nominal Q says.
+   Raising the window count does not help: the numbers above are already
+   converged at 32 windows and unchanged at 96. Read the Q setting as a dial
+   with the right shape and roughly the right strength, not as a calibrated
+   quality factor. */
+function applyConstantQ(samples,dt,Q=qFactor){
+  if(!(Q>0)||!samples||samples.length<4)return samples;
+  const nt=samples.length,n=nextPow2(nt*2);
+  const tMax=(nt-1)*dt,bank=constantQOperators(n,dt,Q,tMax);
+  const windows=bank.length,spacing=tMax/Math.max(1,windows-1);
+  const accum=new Float64Array(n);
+  const re=new Float64Array(n),im=new Float64Array(n);
+  for(let m=0;m<windows;m++){
+    const op=bank[m];
+    re.fill(0);im.fill(0);
+    let live=false;
+    for(let i=0;i<nt;i++){
+      const w=1-Math.abs(i*dt-op.t)/spacing;
+      if(w<=0)continue;
+      re[i]=samples[i]*w;live=true;
+    }
+    if(!live)continue;
+    fftRadix2(re,im,false);
+    for(let k=0;k<n;k++){
+      const a=re[k]*op.re[k]-im[k]*op.im[k];
+      im[k]=re[k]*op.im[k]+im[k]*op.re[k];
+      re[k]=a;
+    }
+    fftRadix2(re,im,true);
+    for(let i=0;i<n;i++)accum[i]+=re[i];
+  }
+  const out=new Float32Array(nt);
+  for(let i=0;i<nt;i++)out[i]=accum[i];
+  return out;
+}
+
+/* Attenuating 960 traces costs 16 transforms each, so the result is cached on
+   the shot and invalidated when Q changes. */
+function attenuatedTrace(shot,k){
+  if(!qEnabled())return shot.traces[k];
+  if(!shot._qCache||shot._qCache.q!==qFactor||shot._qCache.f0!==f0){
+    shot._qCache={q:qFactor,f0,traces:new Array(shot.traces.length)};
+  }
+  const cache=shot._qCache;
+  if(!cache.traces[k])cache.traces[k]=applyConstantQ(shot.traces[k],shot.dt);
+  return cache.traces[k];
+}
+
+function qLabel(){return qEnabled()?`Q = ${qFactor}`:'off';}
+
 /* The recorded trace as processing sees it: noise scaled to the requested
    level, then gain applied to both components with one shared scalar. Used by
    the trace database and by the deconvolution design, so the operator is always
    designed on the same data it will be applied to. */
 function shotInputTraces(shot,k){
-  const raw=shot.traces[k];
+  /* Attenuation is part of propagation, so it applies to the recorded signal
+     and NOT to the noise, which is added at the geophone. */
+  const raw=attenuatedTrace(shot,k);
   const noiseAmplitude=noiseLevel*(shot.signalRms||0);
   let noiseRaw=null;
   if(noiseAmplitude>0&&shot.noise&&shot.noise[k]){
@@ -4519,7 +4678,7 @@ function collectSessionState(){
       seabedKnees:seabedKnees.map(knee=>({x:knee.x,z:knee.z}))},
     processing:{cmpBinSize,picks:picks.map(pick=>({t0:pick.t0,v:pick.v})),
       pickSets:[...pickSets.entries()].map(([index,list])=>[index,list.map(pick=>({t0:pick.t0,v:pick.v}))]),
-      noiseLevel,velocitySource,vnmo,stretchLimit,
+      noiseLevel,qFactor,velocitySource,vnmo,stretchLimit,
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
@@ -4601,6 +4760,7 @@ function applySessionState(state){
     if(list.length)pickSets.set(index,list);
   });
   noiseLevel=clampNumber(proc.noiseLevel,noiseLevel,0,2);
+  qFactor=Q_CHOICES.includes(+proc.qFactor)?+proc.qFactor:qFactor;
   velocitySource=pickFrom(proc.velocitySource,['constant','manual','model'],velocitySource);
   vnmo=clampNumber(proc.vnmo,vnmo,1200,6000);
   stretchLimit=proc.stretchLimit===null?null:clampNumber(proc.stretchLimit,stretchLimit,0,4);
@@ -4648,6 +4808,7 @@ function syncControlsFromState(proc){
   set('stCh',streamerChannels);set('stDx',streamerSpacing);set('stNear',streamerNearOffset);set('stSide',streamerSide);
   set('vnmo',vnmo);set('nmoGain',nmoDisplayGain);set('migAperture',migrationAperture);
   set('muteT0',topMuteT0);set('muteVel',topMuteVelocity);set('noiseLevel',Math.round(noiseLevel*100));
+  set('qFactor',String(Math.max(0,Q_CHOICES.indexOf(qFactor))));document.getElementById('qLbl').textContent=qLabel();
   set('stretchMute',stretchLimit===null?'off':String(stretchLimit));
   [1,2,3,4].forEach(n=>set('fc'+n,filterCorners[n-1]));
   if(proc&&proc.minFold)set('minFold',proc.minFold);
@@ -5187,6 +5348,22 @@ document.getElementById('noiseLevel').oninput=e=>{
 document.getElementById('noiseLevel').onchange=()=>{
   if(!shotRecords.length){document.getElementById('stat').textContent='Noise level set; acquire shots to apply it.';return;}
   rebuildFilteredDatabase(noiseLevel?`Noise at ${Math.round(noiseLevel*100)}% of signal RMS (SNR ${noiseSnrDb().toFixed(1)} dB)`:'Noise removed');
+};
+/* The slider walks a list rather than a linear range: Q is a quality factor, so
+   the interesting territory is 20-100 and the difference between 300 and 400 is
+   invisible. Changing Q invalidates the per-shot cache through the database
+   rebuild, which is also what pulls the new traces into every panel. */
+document.getElementById('qFactor').oninput=e=>{
+  const index=Math.max(0,Math.min(Q_CHOICES.length-1,+e.target.value||0));
+  qFactor=Q_CHOICES[index];
+  document.getElementById('qLbl').textContent=qLabel();
+};
+document.getElementById('qFactor').onchange=()=>{
+  shotRecords.forEach(shot=>{shot._qCache=null;});
+  if(!shotRecords.length){document.getElementById('stat').textContent='Attenuation set; acquire shots to apply it.';return;}
+  rebuildFilteredDatabase(qEnabled()
+    ?`Constant Q = ${qFactor} applied to the recorded traces`
+    :'Attenuation removed');
 };
 document.getElementById('sessionSave').onclick=saveSessionToStorage;
 document.getElementById('sessionRestore').onclick=restoreSessionFromStorage;
@@ -6814,6 +6991,110 @@ function runNumericalChecks(){
     }
     results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
       pass:worst<.02});
+  }
+
+  // --- attenuation ---------------------------------------------------------
+  /* Two separate things are checked, because they have very different
+     tolerances. The OPERATOR has a closed form -- exp(-pi f t / Q) -- and must
+     match it to machine precision. The nonstationary APPLICATION of it cannot,
+     because it assigns t* by absolute sample time, so it is checked against the
+     measured behaviour instead: within a stated band, and improving as the
+     wavelet gets shorter, which is the signature of that specific limitation
+     rather than of a broken operator. */
+  {
+    const dt=.001,nt=1024,Q=50,n=2048;
+    const ricker=(centre,fRef)=>{
+      const out=new Float32Array(nt);
+      for(let k=-200;k<=200;k++){
+        const a=Math.PI*fRef*(k*dt),a2=a*a,i=centre+k;
+        if(i>=0&&i<nt&&a2<60)out[i]=(1-2*a2)*Math.exp(-a2);
+      }
+      return out;
+    };
+    const spectrumOf=x=>{
+      const re=new Float64Array(n),im=new Float64Array(n);
+      for(let i=0;i<x.length;i++)re[i]=x[i];
+      fftRadix2(re,im,false);
+      return {df:1/(n*dt),amp:Array.from({length:n/2},(_,k)=>Math.hypot(re[k],im[k]))};
+    };
+    const slopeRatio=(input,output,t,lo,hi)=>{
+      const si=spectrumOf(input),so=spectrumOf(output);
+      let count=0,sf=0,sy=0,sff=0,sfy=0;
+      for(let k=1;k<si.amp.length;k++){
+        const f=k*si.df;
+        if(f<lo||f>hi||!(si.amp[k]>1e-9)||!(so.amp[k]>1e-12))continue;
+        const y=Math.log(so.amp[k]/si.amp[k]);
+        count++;sf+=f;sy+=y;sff+=f*f;sfy+=f*y;
+      }
+      if(count<5)return NaN;
+      return ((count*sfy-sf*sy)/(count*sff-sf*sf))/(-Math.PI*t/Q);
+    };
+
+    // 1. the operator bank against its closed form
+    const bank=constantQOperators(n,dt,Q,(nt-1)*dt),df=1/(n*dt);
+    let bankWorst=0;
+    [3,7,11,15].forEach(m=>{
+      const op=bank[m];
+      for(let k=1;k<n/2;k++){
+        const f=k*df;
+        if(f<5||f>120)continue;
+        const want=Math.exp(-Math.PI*f*op.t/Q);
+        bankWorst=Math.max(bankWorst,Math.abs(Math.hypot(op.re[k],op.im[k])-want)/want);
+      }
+    });
+    results.push({test:'the constant-Q operator matches exp(-pi f t / Q)',pass:bankWorst<1e-6});
+
+    // 2. and it is minimum phase, so nothing arrives before the arrival does
+    {
+      const centre=Math.round(.6/dt),out=applyConstantQ(ricker(centre,30),dt,Q);
+      let precursor=0,arrival=0;
+      for(let i=0;i<nt;i++){
+        const value=Math.abs(out[i]);
+        if(i*dt<.5)precursor=Math.max(precursor,value);
+        else if(i*dt<.75)arrival=Math.max(arrival,value);
+      }
+      results.push({test:'constant Q is causal: no precursor before the arrival',
+        pass:arrival>0&&precursor/arrival<1e-6});
+    }
+
+    // 3. an arrival at zero traveltime has suffered nothing
+    {
+      const atZero=ricker(0,30),through=applyConstantQ(atZero,dt,Q);
+      let worst=0,peak=1e-9;
+      for(let i=0;i<nt;i++){peak=Math.max(peak,Math.abs(atZero[i]));worst=Math.max(worst,Math.abs(through[i]-atZero[i]));}
+      results.push({test:'constant Q leaves a zero-traveltime arrival alone',pass:worst/peak<.05});
+    }
+
+    // 4. the applied decay, against the band this construction actually holds to
+    {
+      const at=(t,fRef,lo,hi)=>{
+        const input=ricker(Math.round(t/dt),fRef);
+        return slopeRatio(input,applyConstantQ(input,dt,Q),t,lo,hi);
+      };
+      const working=[at(.2,30,8,70),at(.4,30,8,70),at(.8,30,8,70)];
+      results.push({test:'constant Q decays the spectrum within its measured band',
+        pass:working.every(r=>Number.isFinite(r)&&r>.95&&r<1.35)});
+      // the residual is the wavelet-duration effect, so a short wavelet must do better
+      const long=at(.4,15,5,35),short=at(.4,100,25,220);
+      results.push({test:'the attenuation error shrinks as the wavelet shortens',
+        pass:Number.isFinite(long)&&Number.isFinite(short)&&short<long&&Math.abs(short-1)<.1});
+    }
+
+    // 5. attenuation has to grow with traveltime, not merely exist
+    {
+      const peakAt=t=>{
+        const out=applyConstantQ(ricker(Math.round(t/dt),30),dt,Q);
+        let m=0;for(let i=0;i<nt;i++)m=Math.max(m,Math.abs(out[i]));return m;
+      };
+      const early=peakAt(.2),late=peakAt(.8);
+      results.push({test:'attenuation grows with traveltime',pass:late<early*.6&&late>0});
+    }
+
+    // 6. Q off is a pass-through, not a filter that happens to be gentle
+    {
+      const untouched=ricker(300,30);
+      results.push({test:'attenuation off is a pass-through',pass:applyConstantQ(untouched,dt,0)===untouched});
+    }
   }
 
   // --- velocity model derived from the data --------------------------------

@@ -544,6 +544,11 @@
       <div class="panel">
         <div class="toolbar">
           <label>All-CMP velocity <select id="allVelocity"><option value="model">Model RMS at each CMP</option><option value="field">Interpolated field from picked CMPs</option><option value="shared">Apply this CMP's picks to all CMPs</option></select></label>
+          <label>Offset test <select id="offsetTest">
+            <option value="0">off</option>
+            <option value="0.5">drop the far half</option>
+            <option value="0.33">keep the near third</option>
+          </select></label>
           <label><input type="checkbox" id="dmoOn"> DMO before stack</label>
           <label>Minimum fold <select id="minFold"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
           <button id="processAll" class="on">NMO + Stack All CMPs</button>
@@ -552,7 +557,7 @@
           <label><input type="checkbox" id="finalWiggle" checked> Wiggle overlay</label>
           <label>Display gain <input class="compact-range" type="range" id="finalGain" min="0.5" max="4" step="0.1" value="1.6"><span id="finalGainLbl" class="metric">1.6×</span></label>
           <label>Time gain <select id="finalTimeGain"><option value="none">None</option><option value="sqrt" selected>√t compensation</option><option value="linear">t compensation</option></select></label>
-          <span class="view-switch" role="group" aria-label="Final section comparison view"><button id="finalViewStack" class="on" aria-pressed="true">Stack</button><button id="finalViewMigrated" aria-pressed="false">Migrated</button><button id="finalViewModel" aria-pressed="false">Model TWT</button></span>
+          <span class="view-switch" role="group" aria-label="Final section comparison view"><button id="finalViewStack" class="on" aria-pressed="true">Stack</button><button id="finalViewMigrated" aria-pressed="false">Migrated</button><button id="finalViewNear" aria-pressed="false">Near-offset</button><button id="finalViewModel" aria-pressed="false">Model TWT</button></span>
           <label><input type="checkbox" id="finalFlip"> Flip-flop</label>
         </div>
         <p class="ttl" id="finalTitle">CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span></p>
@@ -564,7 +569,7 @@
         <p class="ttl" style="margin-top:8px">Fold</p>
         <canvas id="finalFold" width="1040" height="110" aria-label="Fold aligned to final CMP stack"></canvas>
         <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
-        <div class="note"><b>DMO</b> runs between NMO and the stack, across midpoints within each common-offset section, because it is a constant-offset operator and cannot be applied one CMP at a time. An input sample at midpoint y and NMO time t<sub>n</sub> maps onto the ellipse (Δy/h)² + (t₀/t<sub>n</sub>)² = 1, so the operator reads its inputs at t<sub>n</sub> = t₀/√(1−Δy²/h²). At Δy = 0 that mapping is stationary, which is what concentrates a flat event back onto itself instead of smearing it around the ellipse. The point of it is that one stacking velocity cannot flatten two dips sharing a midpoint — exactly what happens at a syncline bow-tie.</div><div class="note warning"><b>Measured, and it does not pay here.</b> On the one-interface syncline with 24 shots, RMS time error of the imaged reflector against the model is <b>23.5 ms</b> stacked and <b>12.4 ms</b> migrated without DMO, against <b>25.6</b> and <b>12.9</b> with it; mean peak amplitude drops from 1786 to 1637. Three explanations were tested and two of them are wrong. <b>Offset binning was real:</b> sections were originally 40 m wide in offset on a spread recording every 20 m, so the operator got a mean half-offset instead of one number — binning on the geometry’s own offset increment halved the migrated penalty, from +1.0 ms to +0.45 ms. <b>The weight shape is not the cause:</b> sweeping the exponent from 1 to 12 moves the migrated error only between 12.73 and 12.89 ms. <b>And it is not that the test was unfair:</b> handing NMO the true velocity does much of DMO’s job for it, so the obvious suspicion is that DMO would win once velocities are picked from the data instead — it does not. With velocities auto-picked at 27 CMPs the migrated error goes from 15.6 ms without DMO to <b>19.3 ms</b> with it, a larger penalty, not a smaller one. The geometry is right — the self-tests hold a dipping event to the ellipse’s stationary point within three samples — and it still costs more than it buys. What is left is the regularisation itself: irregular midpoints and offsets resampled onto a grid, with duplicates averaged. Fixing that is trace interpolation, which is a different piece of work. Leave DMO off unless you want to watch the trade.</div><div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
+        <div class="note"><b>DMO</b> runs between NMO and the stack, across midpoints within each common-offset section, because it is a constant-offset operator and cannot be applied one CMP at a time. An input sample at midpoint y and NMO time t<sub>n</sub> maps onto the ellipse (Δy/h)² + (t₀/t<sub>n</sub>)² = 1, so the operator reads its inputs at t<sub>n</sub> = t₀/√(1−Δy²/h²). At Δy = 0 that mapping is stationary, which is what concentrates a flat event back onto itself instead of smearing it around the ellipse. The point of it is that one stacking velocity cannot flatten two dips sharing a midpoint — exactly what happens at a syncline bow-tie.</div><div class="note warning"><b>Measured, and it does not pay here.</b> On the one-interface syncline with 24 shots, RMS time error of the imaged reflector against the model is <b>23.5 ms</b> stacked and <b>12.4 ms</b> migrated without DMO, against <b>25.6</b> and <b>12.9</b> with it; mean peak amplitude drops from 1786 to 1637. Three explanations were tested and two of them are wrong. <b>Offset binning was real:</b> sections were originally 40 m wide in offset on a spread recording every 20 m, so the operator got a mean half-offset instead of one number — binning on the geometry’s own offset increment halved the migrated penalty, from +1.0 ms to +0.45 ms. <b>The weight shape is not the cause:</b> sweeping the exponent from 1 to 12 moves the migrated error only between 12.73 and 12.89 ms. <b>And it is not that the test was unfair:</b> handing NMO the true velocity does much of DMO’s job for it, so the obvious suspicion is that DMO would win once velocities are picked from the data instead — it does not. With velocities auto-picked at 27 CMPs the migrated error goes from 15.6 ms without DMO to <b>19.3 ms</b> with it, a larger penalty, not a smaller one. The geometry is right — the self-tests hold a dipping event to the ellipse’s stationary point within three samples — and it still costs more than it buys. What is left is the regularisation itself: irregular midpoints and offsets resampled onto a grid, with duplicates averaged. Fixing that is trace interpolation, which is a different piece of work. Leave DMO off unless you want to watch the trade.</div><div class="note warning"><b>The far-offset test.</b> A stack can hold events the earth never produced, and nothing downstream can tell: migration only repositions energy that is already there, so a false event migrates as obediently as a true one. On a curved reflector the reflection point slides along the interface as offset grows, so far-offset moveout is not hyperbolic; NMO with one RMS velocity per midpoint under-corrects it and the stack sums the residual into something shaped exactly like a reflector. Set <b>Offset test</b>, restack, and flip <b>Stack</b> against <b>Near-offset</b>. A real reflection is recorded at every offset, so dropping the far ones leaves it noisier but present; an event built out of far-offset residual has nothing to stand on and vanishes. The near-offset stack is lower fold and <em>not</em> the product — it answers one question, is this event still here.</div><div class="note">Measured on the two-layer syncline (2000 m/s over 3200 m/s, trough at 460 m), acquired with an <b>absorbing top so no multiple of any order exists</b>: the full-offset stack carries events at 0.55 s and 0.60 s below the true trough at 0.48 s. The test flags <b>17 of 55 bins</b>, spanning 0.50–0.61 s, once offsets beyond 373 m are dropped — and the near-offset stack does not show them at all. They are not multiples, and not the bow-tie: the normal-incidence triplication branches all arrive between 0.470 and 0.490 s, and the first surface multiple would belong at 0.933 s. They are made by the stack.</div><div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
         <div class="depth-block">
           <p class="ttl">Migration — time and depth, both plotted in depth</p>
           <div class="toolbar">
@@ -4303,7 +4308,7 @@ function processAllCMPs(){
   const mode=document.getElementById('allVelocity').value,minFold=+document.getElementById('minFold').value;
   const field=pickedVelocityField();
   if(mode==='field'&&!field){document.getElementById('finalInfo').textContent='No velocity picks yet — pick on the semblance panel at one or more CMPs, or choose a different velocity source.';return;}
-  finalStacks=new Map();migratedStacks=new Map();depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  finalStacks=new Map();migratedStacks=new Map();nearStacks=new Map();farOffsetReport=null;depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
   /* NMO first for the whole line, then DMO across midpoints, then stack. DMO
      cannot run inside the per-CMP loop: it is a constant-OFFSET operator, so it
      needs every midpoint at a given offset at once. */
@@ -4321,15 +4326,40 @@ function processAllCMPs(){
   nmoByIndex.forEach((entry,index)=>{
     finalStacks.set(index,{index,center:entry.center,fold:entry.records.length,stack:stackOf(entry.result)});
   });
+  /* The same sequence again on the near offsets only. It is deliberately a
+     SECOND pass over the raw gathers rather than a re-sum of the corrected
+     traces, so the near stack carries its own NMO, its own stretch mute and its
+     own fold -- exactly what it would be if you had shot a shorter spread. */
+  nearStacks=new Map();farOffsetReport=null;
+  const offsetLimit=offsetTestLimit();
+  if(offsetLimit>0){
+    keys.forEach(index=>{
+      const all=cmpBins.get(index);
+      if(!all)return;
+      const near=all.filter(record=>Math.abs(record.sourceReceiverOffset)<=offsetLimit);
+      if(near.length<2)return;
+      const center=cmpOrigin+index*cmpBinSize;
+      const velocityFunction=mode==='model'?(t0)=>modelVAt(t0,center)
+        :mode==='field'&&field?(t0)=>field(t0,index)
+        :(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
+      const result=demultipleIfEnabled(applyNMO(near,velocityFunction,stretchLimit));
+      nearStacks.set(index,{index,center,fold:near.length,stack:stackOf(result)});
+    });
+    farOffsetReport=buildFarOffsetReport();
+  }
   finalRange={min:keys[0],max:keys[keys.length-1],minFold,mode};drawFinalSection();updateFlow();
   const located=pickedCmpIndices();
   const velocitySummary=mode==='model'?'time-varying Model RMS at each midpoint'
     :mode==='field'?`interpolated field from ${located.length} picked CMP${located.length===1?'':'s'}`
     :(picks.length?"this CMP's picks applied everywhere":'constant velocity fallback (no picks)');
+  const testSummary=farOffsetReport
+    ? ` · far-offset test at ${farOffsetReport.limit.toFixed(0)} m: ${farOffsetReport.flagged} of ${farOffsetReport.checked} bins carry an event that vanishes without the far offsets`+
+      (farOffsetReport.medianTime!==null?`, around ${farOffsetReport.medianTime.toFixed(2)} s`:'')
+    : (offsetTestFraction>0?' · far-offset test found no bin with enough near traces':'');
   const dmoSummary=dmoReport
     ? ` · DMO on ${dmoReport.corrected} traces across ${dmoReport.groups} common-offset sections`
     : (dmoEnabled?' · DMO requested but no offset section had enough midpoints':'');
-  document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}${dmoSummary}. Blank columns are not interpolated.`;
+  document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}${dmoSummary}${testSummary}. Blank columns are not interpolated.`;
 }
 
 /* ---------------- dip moveout ----------------
@@ -4498,6 +4528,95 @@ function dmoCorrectAll(nmoByIndex){
     });
   });
   return {contributing,corrected,groups:groups.size};
+}
+
+/* ---------------- the far-offset test ----------------
+
+   A stack can contain events the earth never produced, and nothing downstream
+   can tell. On a curved reflector the reflection point slides along the
+   interface as offset grows, so the far-offset moveout is not hyperbolic; NMO
+   with one RMS velocity per midpoint under-corrects it, and the stack sums that
+   residual into something that looks exactly like a reflector. Migration cannot
+   help -- it only repositions energy that is already in the stack, so a false
+   event migrates as obediently as a true one.
+
+   The test is the one thing that separates them: STACK IT TWICE. A real
+   reflection is present at every offset, so dropping the far offsets makes it
+   noisier but leaves it there. An event built out of far-offset residual has
+   nothing to stand on and disappears. Flipping between the two is how this is
+   done at a workstation, and the tool now does it in one control instead of the
+   four separate experiments it took to identify the artefact by hand.
+
+   The near-offset stack is NOISIER, not better. It is a diagnostic, never the
+   product: fold falls with the offset range, so anything it shows is a weaker
+   estimate of the same thing. What it is good for is answering one question --
+   is this event still here? */
+let offsetTestFraction=0,nearStacks=new Map(),farOffsetReport=null;
+
+function offsetTestLimit(){
+  if(!(offsetTestFraction>0))return 0;
+  let far=0;
+  cmpBins.forEach(records=>{
+    records.forEach(record=>{far=Math.max(far,Math.abs(record.sourceReceiverOffset));});
+  });
+  return far*offsetTestFraction;
+}
+
+/* Events the full-offset stack has and the near-offset stack does not. Both are
+   measured against their OWN peak, because the near stack is quieter -- the
+   question is whether the event is present in it at all, not whether it is as
+   loud. */
+function farOffsetOnlyEvents(full,near,dt,threshold=.18){
+  const peakOf=samples=>{let m=0;for(let i=0;i<samples.length;i++)m=Math.max(m,Math.abs(samples[i]));return m;};
+  const fullPeak=peakOf(full),nearPeak=peakOf(near);
+  if(!(fullPeak>0)||!(nearPeak>0))return [];
+  const window=Math.max(2,Math.round((1/Math.max(1,f0))/dt));
+  /* Collect the local maxima above threshold, then GROUP them. A Ricker's side
+     lobes reach 45% of its peak, so one arrival produces three detections, and
+     the first of them sits a side lobe early -- reporting that as the event's
+     time is wrong by a third of a period. Each group is reported at its
+     strongest sample, which is the arrival. */
+  const peaks=[];
+  for(let i=1;i<full.length-1;i++){
+    const v=Math.abs(full[i]);
+    if(v<threshold*fullPeak)continue;
+    if(v<Math.abs(full[i-1])||v<Math.abs(full[i+1]))continue;
+    peaks.push({i,v});
+  }
+  const groups=[];
+  peaks.forEach(peak=>{
+    const last=groups[groups.length-1];
+    if(last&&peak.i-last.last<=window){
+      last.last=peak.i;
+      if(peak.v>last.v){last.v=peak.v;last.i=peak.i;}
+    }else groups.push({i:peak.i,v:peak.v,last:peak.i});
+  });
+  const out=[];
+  groups.forEach(group=>{
+    for(let j=Math.max(0,group.i-window);j<=Math.min(near.length-1,group.i+window);j++){
+      if(Math.abs(near[j])>=threshold*nearPeak)return;
+    }
+    out.push(group.i*dt);
+  });
+  return out;
+}
+
+function buildFarOffsetReport(){
+  if(!offsetTestFraction||!nearStacks.size||!finalStacks.size)return null;
+  let flagged=0,checked=0;const times=[];
+  finalStacks.forEach((entry,index)=>{
+    const near=nearStacks.get(index);
+    if(!near||!near.stack||!entry.stack)return;
+    checked++;
+    const found=farOffsetOnlyEvents(entry.stack.samples,near.stack.samples,entry.stack.dt);
+    if(found.length){flagged++;found.forEach(t=>times.push(t));}
+  });
+  if(!checked)return null;
+  times.sort((a,b)=>a-b);
+  const median=times.length?times[Math.floor(times.length/2)]:null;
+  return {checked,flagged,limit:offsetTestLimit(),
+    medianTime:median,count:times.length,
+    span:times.length?[times[0],times[times.length-1]]:null};
 }
 
 /* ---------------- post-stack time migration ---------------- */
@@ -5093,7 +5212,7 @@ function drawFinalModelReference(ctx,L,T,pw,ph,min,max){
 }
 
 function updateFinalViewControls(){
-  const buttons={stack:'finalViewStack',migrated:'finalViewMigrated',model:'finalViewModel'};
+  const buttons={stack:'finalViewStack',migrated:'finalViewMigrated',near:'finalViewNear',model:'finalViewModel'};
   Object.entries(buttons).forEach(([view,id])=>{
     const button=document.getElementById(id),on=finalView===view;
     button.classList.toggle('on',on);button.setAttribute('aria-pressed',String(on));
@@ -5101,11 +5220,13 @@ function updateFinalViewControls(){
   const titles={
     stack:'CMP STACK — UNMIGRATED <span class="view-badge">DISPLAY GAIN ONLY</span>',
     migrated:'MIGRATED SECTION — POST-STACK KIRCHHOFF <span class="view-badge">DISPLAY GAIN ONLY</span>',
+    near:'NEAR-OFFSET STACK — DIAGNOSTIC <span class="view-badge">LOWER FOLD, NOT THE PRODUCT</span>',
     model:'ORIGINAL MODEL — VERTICAL TIME REFERENCE <span class="view-badge">NOT MIGRATED</span>'
   };
   const labels={
     stack:'Unmigrated two-dimensional CMP stack',
     migrated:'Post-stack Kirchhoff time-migrated section',
+    near:'CMP stack built from the near offsets only, as a far-offset artefact test',
     model:'Original velocity model converted to vertical two-way time'
   };
   document.getElementById('finalTitle').innerHTML=titles[finalView];
@@ -5119,7 +5240,9 @@ function stopFinalFlip(uncheck=true){
 
 function setFinalComparisonView(view,fromFlip=false){
   if(!fromFlip)stopFinalFlip(true);
-  finalView=view==='model'?'model':view==='migrated'?'migrated':'stack';
+  finalView=view==='model'?'model':view==='migrated'?'migrated':view==='near'?'near':'stack';
+  /* `near` is a diagnostic, so it is a data view like the others -- flipping it
+     against the full-offset stack is the whole point of having it. */
   if(finalView!=='model')finalDataView=finalView;
   updateFinalViewControls();drawFinalSection();
 }
@@ -5151,7 +5274,7 @@ function drawFinalSection(){
   drawVelocityFieldPanel();drawMigrationComparison();
   const cmpKeys=[...cmpBins.keys()].sort((a,b)=>a-b),range=finalRange||(finalView==='model'?(cmpKeys.length?{min:cmpKeys[0],max:cmpKeys.at(-1)}:potentialSurveyCmpRange()):null);
   if(!range){ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';ctx.fillText(finalView==='model'?'Build CMP gathers to establish the model-comparison midpoint range.':'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);return;}
-  const activeStacks=finalView==='migrated'?migratedStacks:finalStacks;
+  const activeStacks=finalView==='migrated'?migratedStacks:finalView==='near'?nearStacks:finalStacks;
   const {min,max}=range,count=max-min+1,stacks=[...activeStacks.values()],profile=finalDisplayProfile(stacks);
   if(finalView==='model'){
     drawFinalModelReference(ctx,L,T,pw,ph,min,max);
@@ -5171,7 +5294,9 @@ function drawFinalSection(){
     document.getElementById('finalDisplayInfo').textContent=`${finalView==='migrated'?`Migrated section · aperture ${migrationAperture} m. `:''}Display only: robust P98.5 clip · ${gainName} compensation · ${profile.gain.toFixed(1)}× gain. Processed samples are unchanged.`;
   }else{
     ctx.fillStyle='#8a949f';ctx.font='12px ui-sans-serif';
-    ctx.fillText(finalView==='migrated'?'Run "Migrate stack" after stacking to build the migrated section.':'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);
+    ctx.fillText(finalView==='migrated'?'Run "Migrate stack" after stacking to build the migrated section.'
+      :finalView==='near'?'Choose an Offset test other than off, then NMO + Stack All CMPs.'
+      :'NMO + Stack All CMPs to build the final unmigrated section.',L,T+20);
   }
   ctx.strokeStyle='rgba(35,42,51,.75)';ctx.fillStyle='#a0abb6';ctx.font='10px ui-sans-serif';
   for(let s=0;s<=tmax+1e-6;s+=.2){const y=T+s/tmax*ph;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke();ctx.fillText(s.toFixed(1)+' s',3,y+3);}
@@ -5207,7 +5332,7 @@ function collectSessionState(){
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
-      migrationAperture,dmoEnabled,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
+      migrationAperture,dmoEnabled,offsetTestFraction,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
       depthMigrationAperture,depthDerived:document.getElementById('depthDerived').checked,
       autoPickStride:document.getElementById('autoPickStride').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
@@ -5349,6 +5474,7 @@ function syncControlsFromState(proc){
   }
   if(proc&&typeof proc.depthDerived==='boolean')check('depthDerived',proc.depthDerived);
   if(proc&&typeof proc.dmoEnabled==='boolean'){dmoEnabled=proc.dmoEnabled;check('dmoOn',dmoEnabled);}
+  if(proc&&Number.isFinite(+proc.offsetTestFraction)){offsetTestFraction=Math.max(0,Math.min(.9,+proc.offsetTestFraction));set('offsetTest',String(offsetTestFraction||0));}
   set('gainMode',gainMode);set('agcWindow',agcWindowMs);
   set('radonCut',radonCutMs);set('radonMax',radonMaxMs);check('radonOn',radonEnabled);
   set('deconMode',deconMode);set('deconLag',deconLagMs);set('deconOperator',deconOperatorMs);set('deconPrewhiten',deconPrewhiten);
@@ -5655,7 +5781,7 @@ function clearAcquisitionRecords(){
   running=false;paused=false;shotRecords=[];acquisitionTraces=[];cmpBins=new Map();selectedCmpIndex=null;selectedTraceKey=null;
   // Every derived product goes with the records, migration included -- leaving
   // it behind would show a migrated section belonging to data that is gone.
-  finalStacks.clear();migratedStacks.clear();depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
+  finalStacks.clear();migratedStacks.clear();nearStacks.clear();farOffsetReport=null;depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalRange=null;finalDataView='stack';if(finalView==='migrated')finalView='stack';
   semb=null;sembDirty=true;cvsCache=null;pickSets=new Map();picks=[];
   activeShotId=null;setup();document.getElementById('pauseAcq').textContent='Pause';document.getElementById('acqProgress').style.width='0%';
   document.getElementById('speedPerf').textContent=`Target ${simulationSpeed}×; run an acquisition to measure achieved speed. Solver dt and recorded traces are unchanged.`;
@@ -6678,6 +6804,12 @@ document.getElementById('cmpBinSize').onchange=e=>{cmpBinSize=Math.max(5,+e.targ
 document.getElementById('buildCmp').onclick=()=>{cmpBinSize=Math.max(5,+document.getElementById('cmpBinSize').value||25);buildCmpBins();setStage('cmp');updateFlow();};
 document.getElementById('prevCmp').onclick=()=>moveCmp(-1);document.getElementById('nextCmp').onclick=()=>moveCmp(1);
 document.getElementById('prevCmpNmo').onclick=()=>moveCmp(-1,'nmo');document.getElementById('nextCmpNmo').onclick=()=>moveCmp(1,'nmo');
+document.getElementById('offsetTest').onchange=e=>{
+  offsetTestFraction=+e.target.value||0;
+  document.getElementById('finalInfo').textContent=offsetTestFraction
+    ? 'Far-offset test armed. Press NMO + Stack All CMPs, then flip Stack against Near-offset: an event that disappears was built by the far offsets, not by a reflector.'
+    : 'Far-offset test off. Press NMO + Stack All CMPs to restack.';
+};
 document.getElementById('dmoOn').onchange=e=>{
   dmoEnabled=e.target.checked;
   document.getElementById('finalInfo').textContent=dmoEnabled
@@ -6931,6 +7063,7 @@ document.getElementById('depthDerived').onchange=()=>{if(depthImage)runDepthMigr
 
 document.getElementById('finalViewStack').onclick=()=>setFinalComparisonView('stack');
 document.getElementById('finalViewMigrated').onclick=()=>setFinalComparisonView('migrated');
+document.getElementById('finalViewNear').onclick=()=>setFinalComparisonView('near');
 document.getElementById('finalViewModel').onclick=()=>setFinalComparisonView('model');
 document.getElementById('migrateBtn').onclick=runMigration;
 document.getElementById('finalFlip').onchange=e=>setFinalFlip(e.target.checked);
@@ -7550,6 +7683,41 @@ function runNumericalChecks(){
     }
     results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
       pass:worst<.02});
+  }
+
+  // --- the far-offset test --------------------------------------------------
+  /* The detector has to do two things and it is easy to build one that only
+     does the first: flag an event the near stack does not have, and stay quiet
+     about one it does. The second matters more -- a test that cries wolf on
+     real reflectors is worse than no test, because it teaches you to ignore it.
+     The near trace here is deliberately quieter than the full one, since a
+     lower-fold stack always is, and the detector must not read that as absence. */
+  {
+    const dt=.002,nt=600,fw=30;
+    const put=(out,t,amp)=>{
+      const centre=Math.round(t/dt);
+      for(let k=-40;k<=40;k++){
+        const a=Math.PI*fw*(k*dt),a2=a*a,i=centre+k;
+        if(i>=0&&i<nt&&a2<50)out[i]+=amp*(1-2*a2)*Math.exp(-a2);
+      }
+    };
+    const real=.30,artefact=.60;
+    // full stack: a true reflector plus something only the far offsets built
+    const full=new Float32Array(nt);put(full,real,1);put(full,artefact,.45);
+    // near stack: the reflector alone, at 40% the amplitude and no artefact
+    const near=new Float32Array(nt);put(near,real,.4);
+    const flagged=farOffsetOnlyEvents(full,near,dt);
+    results.push({test:'the far-offset test flags an event the near stack lacks',
+      pass:flagged.length===1&&Math.abs(flagged[0]-artefact)<3*dt});
+
+    // both events present in both: nothing to report, however much quieter
+    const nearBoth=new Float32Array(nt);put(nearBoth,real,.4);put(nearBoth,artefact,.18);
+    results.push({test:'the far-offset test stays quiet when both stacks agree',
+      pass:farOffsetOnlyEvents(full,nearBoth,dt).length===0});
+
+    // and it must not fire on an empty near stack by dividing by nothing
+    results.push({test:'the far-offset test is silent on an empty near stack',
+      pass:farOffsetOnlyEvents(full,new Float32Array(nt),dt).length===0});
   }
 
   // --- dip moveout ---------------------------------------------------------

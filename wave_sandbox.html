@@ -544,6 +544,7 @@
       <div class="panel">
         <div class="toolbar">
           <label>All-CMP velocity <select id="allVelocity"><option value="model">Model RMS at each CMP</option><option value="field">Interpolated field from picked CMPs</option><option value="shared">Apply this CMP's picks to all CMPs</option></select></label>
+          <label><input type="checkbox" id="dmoOn"> DMO before stack</label>
           <label>Minimum fold <select id="minFold"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
           <button id="processAll" class="on">NMO + Stack All CMPs</button>
           <button id="migrateBtn">Migrate stack</button>
@@ -563,7 +564,7 @@
         <p class="ttl" style="margin-top:8px">Fold</p>
         <canvas id="finalFold" width="1040" height="110" aria-label="Fold aligned to final CMP stack"></canvas>
         <div class="hint" id="finalInfo">Build CMP gathers, then process all CMPs. Missing or under-folded bins remain blank.</div>
-        <div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
+        <div class="note"><b>DMO</b> runs between NMO and the stack, across midpoints within each common-offset section, because it is a constant-offset operator and cannot be applied one CMP at a time. An input sample at midpoint y and NMO time t<sub>n</sub> maps onto the ellipse (Δy/h)² + (t₀/t<sub>n</sub>)² = 1, so the operator reads its inputs at t<sub>n</sub> = t₀/√(1−Δy²/h²). At Δy = 0 that mapping is stationary, which is what concentrates a flat event back onto itself instead of smearing it around the ellipse. The point of it is that one stacking velocity cannot flatten two dips sharing a midpoint — exactly what happens at a syncline bow-tie.</div><div class="note warning"><b>Measured, and it does not pay on this tool’s geometry.</b> On the one-interface syncline with 24 shots and the model velocity, RMS time error of the imaged reflector against the model is <b>23.5 ms</b> in the stack and <b>12.4 ms</b> after migration without DMO, against <b>25.2 ms</b> and <b>13.4 ms</b> with it, and the mean peak amplitude drops from 2241 to 1865. DMO makes this case slightly worse. Two costs outweigh the benefit here: energy is preserved per section, so what a flat reflector loses at its peak — measured at 35%, 19% and 15% for half-offsets of 200, 400 and 600 m — goes into the operator’s own smile; and recorded offsets are not repeated exactly from midpoint to midpoint, so traces are binned into 40 m-wide common-offset sections and the operator is handed a mean half-offset, which at short offset is a large fraction of the aperture it is supposed to use. The geometry is right — the self-tests hold a dipping event to the ellipse’s stationary point within 3 samples — and it still costs more than it buys. Leave it off unless you want to watch that trade.</div><div class="note">Use <b>Stack</b> / <b>Migrated</b> / <b>Model TWT</b>, or enable <b>Flip-flop</b>, to compare each section with the original model converted to vertical two-way time. On the unmigrated stack flat reflectors approximately align but dipping events do not: their reflection point is not the surface midpoint. Run <b>Migrate stack</b> and compare again — diffractions collapse, dipping reflectors move updip toward their true position, and a syncline bow-tie unties.</div>
         <div class="depth-block">
           <p class="ttl">Migration — time and depth, both plotted in depth</p>
           <div class="toolbar">
@@ -595,7 +596,7 @@
           
           <div class="note"><b>Bottom left</b> is the same depth migration run through a velocity model built from the data instead: pick stacking velocities on several CMPs, Dix them into interval velocities, integrate those to depth, interpolate sideways between the picked locations. Nothing in that chain consults the model. <b>Bottom right</b> is what the chain got wrong — derived minus true interval velocity, blue too slow, red too fast, with a cyan line at every picked CMP and a tick where its deepest pick ran out. Below that tick the derived model is not so much wrong as absent: the last interval velocity is simply held, because no reflection ever constrained what is down there.</div><div class="note">Press <b>Auto-pick across the line</b> on the Velocity stage first, or the derived model has a single column and no lateral variation at all. The stride matters, but measured on the anticline preset it does not matter in the direction you would guess: picking every gather (46 columns) gives a <em>worse</em> velocity field than picking every eighth (5 columns) — 635 against 540 m/s RMS above the deepest reflector — because the auto-picker’s scatter from gather to gather is larger than the lateral variation it is trying to resolve, and interpolating over long distances averages that scatter away. Denser picking only starts to pay once the picks are better than the structure is strong.</div><div class="note">The arcs above the shallowest reflector are <b>migration aliasing</b>, not noise in the data. The stack is sampled every 20 m while the image grid is 5 m, so the summation curve is under-sampled and its impulse response does not fully cancel. A wider aperture reaches steeper parts of that curve and imports more of it, which is why the default is 500 m rather than the 800 m the time migration uses — try 300 m and 1200 m to see the trade against how much of the deep flanks get illuminated.</div><div class="note warning">The top two panels migrate with the model’s own velocity field — the same array the wave simulation propagates through. They are reference images: what each method recovers when the velocity is right, not results obtainable from the recorded data alone. The bottom-left panel is the honest one, the image this survey could actually have produced. The gap between them is the cost of not knowing the velocity, and it is the only one of the three a real project ever gets to see.</div>
         </div>
-        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: amplitude recovery (√t, t or AGC), predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, CMP stack and post-stack Kirchhoff time migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), statics, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 1912 m/s at the end of the imaged line against 2598 m/s under the crest — 36% of lateral variation across the section that gets migrated — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
+        <details><summary>Teaching assumptions</summary><p>2D variable-density acoustic simulation; simple hyperbolic NMO. Available processing, in sequence order: constant-Q attenuation of the recorded traces, amplitude recovery (√t, t or AGC), f–k dip fan filtering, predictive and spiking deconvolution, zero-phase bandpass, front-end mute, semblance and constant-velocity-stack velocity analysis, Dix inversion, NMO with stretch mute, parabolic Radon demultiple, DMO, CMP stack, and post-stack Kirchhoff time and depth migration.</p><p>Still absent: elastic modes (no shear, no ground roll, no converted waves), statics, pre-stack migration and anisotropy correction. Post-stack <em>depth</em> migration is now present, on the Final Section stage: it sums along eikonal traveltimes through the interval velocity field rather than along a hyperbola from one RMS number, which is what lets it image the anticline flanks that time migration bends into a lens. It can be run either with the model's own velocity field, which shows what depth imaging recovers when the velocity is right, or with a field Dix-inverted from the picked stacking velocities, which shows what the recorded data alone can actually produce; both are displayed together. Migration here is post-stack and uses the stacking velocities, so it inherits any error in them; its amplitude treatment applies obliquity only, without the rho filter or geometric spreading, so positions are meaningful and relative amplitudes are only indicative.</p><p>Two measured caveats worth knowing. <b>Amplitude decay is steeper than either textbook law:</b> first arrivals fall as about r<sup>−1.55</sup>, not the r<sup>−0.50</sup> of 2D cylindrical spreading, because source and receivers sit under a free surface and their ghosts cancel harder with offset — so neither √t nor t is exactly right here, and the Gain panel plots the measurement against both. <b>The Radon transform is the adjoint, not a least-squares inverse:</b> events smear along curvature, so the demultiple discriminates rather than separates — on a marine gather it left a seabed primary intact while removing 45% of the first water-bottom multiple and 80% of the second.</p><p><b>Time migration assumes the velocity above an image point does not vary sideways</b>, and structure breaks that. On the anticline preset the model RMS velocity at 0.51 s runs 1912 m/s at the end of the imaged line against 2598 m/s under the crest — 36% of lateral variation across the section that gets migrated — so an output point beneath the crest sums flank energy that travelled far slower than the velocity it is using, and over-migrates it into a lens under the crest. The shallowest reflector, with almost no laterally varying overburden, images correctly; the deeper two do not. Scaling the migration velocity to 0.75× (about the flank-to-crest ratio) opens the lens back into arches, which is the diagnostic. On the flat preset, where there is no lateral variation, the same operator returns all reflectors cleanly.</p><p><b>The velocity you do not have.</b> The derived model is built only from picks: stacking velocities on several CMPs, Dix to interval velocity, integrated to depth, interpolated sideways. On the anticline preset with 24 shots and picks every fourth gather it lands 585 m/s RMS away from the true interval velocity above the deepest reflector, and 1938 m/s away below it — the second number is not a failure of the method but the absence of data, since no reflection constrains the half-space under the deepest event and the last interval velocity is simply held. The imaged interfaces move accordingly: RMS depth error against the true interfaces goes from <b>13 / 34 / 50 m</b> with the model velocity to <b>26 / 42 / 67 m</b> with the derived one. That gap — roughly a doubling at the shallowest reflector, a third deeper down — is the honest cost of not knowing the velocity, and it is the only version of the image a real project ever gets.</p><p><b>Pick density is not the bottleneck here.</b> Sweeping the auto-pick stride over the same anticline gives 635 m/s RMS velocity error from 46 picked gathers, 609 from 23, 585 from 11 and 540 from 5 — the field gets <em>better</em> as it gets sparser. The auto-picker’s gather-to-gather scatter is larger than the lateral velocity variation it is trying to resolve, so interpolating across long distances averages the scatter out faster than it loses the structure. The imaged-interface errors move less than the velocity numbers suggest, which is the useful part: post-stack depth migration through a smooth, slightly wrong field beats one through a detailed, noisy field.</p><p><b>The two migrations side by side, measured.</b> Tracking each imaged interface against the true one on the anticline preset, in RMS metres of depth error against a 61 m wavelength: interface 1, time <b>21 m</b> against depth <b>36 m</b>; interface 2, time <b>58 m</b> against depth <b>41 m</b>; interface 3, time <b>82 m</b> against depth <b>55 m</b>. Depth migration is not uniformly better — at the shallowest interface, where there is almost nothing laterally varying above it, time migration is sharper, because its output is a direct re-plot of the stack while the depth image pays for an aperture-limited summation and its aliasing. What depth migration buys is that its error stays roughly flat with depth while the time migration's doubles, tracking the lateral velocity variation above each interface.</p><p class="warning">CMP stacking alone does not correct dip — that is what the migration step is there to show. DMO would still be needed where conflicting dips share a midpoint.</p></details>
       </div>
     </section>
   </main>
@@ -4303,21 +4304,171 @@ function processAllCMPs(){
   const field=pickedVelocityField();
   if(mode==='field'&&!field){document.getElementById('finalInfo').textContent='No velocity picks yet — pick on the semblance panel at one or more CMPs, or choose a different velocity source.';return;}
   finalStacks=new Map();migratedStacks=new Map();depthImage=null;timeInDepthImage=null;derivedDepthImage=null;derivedVelocity=null;finalDataView='stack';const keys=[...cmpBins.keys()].sort((a,b)=>a-b);
+  /* NMO first for the whole line, then DMO across midpoints, then stack. DMO
+     cannot run inside the per-CMP loop: it is a constant-OFFSET operator, so it
+     needs every midpoint at a given offset at once. */
+  const nmoByIndex=new Map();
   keys.forEach(index=>{
     const records=cmpBins.get(index);if(records.length<minFold)return;
     const center=cmpOrigin+index*cmpBinSize;
     const velocityFunction=mode==='model'?(t0)=>modelVAt(t0,center)
       :mode==='field'&&field?(t0)=>field(t0,index)
       :(t0)=>picks.length?interpolateVelocity(picks,t0,vnmo):vnmo;
-    const result=demultipleIfEnabled(applyNMO(records,velocityFunction,stretchLimit)),stack=stackOf(result);
-    finalStacks.set(index,{index,center,fold:records.length,stack});
+    nmoByIndex.set(index,{index,center,records,
+      result:demultipleIfEnabled(applyNMO(records,velocityFunction,stretchLimit))});
+  });
+  const dmoReport=dmoEnabled?dmoCorrectAll(nmoByIndex):null;
+  nmoByIndex.forEach((entry,index)=>{
+    finalStacks.set(index,{index,center:entry.center,fold:entry.records.length,stack:stackOf(entry.result)});
   });
   finalRange={min:keys[0],max:keys[keys.length-1],minFold,mode};drawFinalSection();updateFlow();
   const located=pickedCmpIndices();
   const velocitySummary=mode==='model'?'time-varying Model RMS at each midpoint'
     :mode==='field'?`interpolated field from ${located.length} picked CMP${located.length===1?'':'s'}`
     :(picks.length?"this CMP's picks applied everywhere":'constant velocity fallback (no picks)');
-  document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}. Blank columns are not interpolated.`;
+  const dmoSummary=dmoReport
+    ? ` · DMO on ${dmoReport.corrected} traces across ${dmoReport.groups} common-offset sections`
+    : (dmoEnabled?' · DMO requested but no offset section had enough midpoints':'');
+  document.getElementById('finalInfo').textContent=`Processed ${finalStacks.size} of ${keys.length} CMP bins · ${velocitySummary} · minimum fold ${minFold}${dmoSummary}. Blank columns are not interpolated.`;
+}
+
+/* ---------------- dip moveout ----------------
+
+   NMO assumes the reflection point sits below the surface midpoint. For a
+   dipping reflector it does not: the point slides updip as offset grows, and
+   the velocity that flattens the gather comes out as v/cos(dip) rather than v.
+   One stacking velocity therefore cannot flatten two different dips sharing a
+   midpoint -- which is exactly what happens at a syncline bow-tie, where three
+   arrivals with different dips overlap in the same gather.
+
+   DMO removes the dip dependence. An input sample at midpoint y and NMO time
+   t_n maps onto an ellipse in the output,
+
+       (dy/h)^2 + (t0/t_n)^2 = 1,
+
+   with semi-axes the half-offset h in midpoint and t_n in time, so the operator
+   is applied here in gather form: output (y0, t0) reads its inputs at
+   y = y0 - dy and t_n = t0 / sqrt(1 - dy^2/h^2). At dy = 0 the mapping is
+   stationary -- dt_n/d(dy) vanishes -- so a whole range of contributions adds
+   coherently at the apex while the rest of the ellipse cancels, which is what
+   concentrates a flat event back onto itself instead of smearing it into the
+   operator's own smile.
+
+   AMPLITUDE IS CALIBRATED, NOT DERIVED. The geometry above is exact; the weight
+   and the constant in front of it are not, so the scale is fixed the same way
+   MIGRATION_SCALE is -- by requiring that a flat reflector passes through DMO
+   at its own amplitude -- and the self-tests hold it to that. Positions are
+   meaningful; relative amplitudes are indicative. */
+let dmoEnabled=false;
+const DMO_TAPER=.15;                 // cosine taper over the outer 15% of the aperture
+/* The weight exponent along the ellipse, set by measurement. Position is fixed
+   by stationary phase and is insensitive to it -- the imaged time moved under a
+   millisecond from power 0 to power 6 -- but the operator's own smile is not:
+   the energy above the apex falls from 93% of the apex at power 0 to 66% at 1,
+   37% at 3 and 29% at 6, while a dip steep enough to matter here is attenuated
+   by under 7% even at power 4. Three buys most of the suppression for almost
+   none of the operator. */
+let DMO_WEIGHT_POWER=3;
+
+/* Traces are grouped into common-offset sections on the CMP grid, because DMO
+   is a constant-offset operator and the recorded offsets are not exactly
+   repeated from midpoint to midpoint. Two traces landing in the same offset bin
+   at the same midpoint are averaged and share the corrected result. */
+function dmoCorrectAll(nmoByIndex){
+  const spacing=cmpBinSize,groups=new Map();
+  let contributing=0;
+  nmoByIndex.forEach((entry,index)=>{
+    const records=entry.result.correctedRecords;
+    records.forEach((record,k)=>{
+      const half=Math.abs(record.sourceReceiverOffset)/2;
+      const bin=Math.round(half/spacing);
+      if(bin<1)return;                       // no aperture at (near) zero offset
+      if(!groups.has(bin))groups.set(bin,new Map());
+      const byMid=groups.get(bin);
+      if(!byMid.has(index))byMid.set(index,{sum:new Float64Array(record.nt),n:0,halfSum:0,nt:record.nt,dt:record.dt,members:[]});
+      const slot=byMid.get(index);
+      const nt=Math.min(slot.sum.length,record.nt);
+      for(let i=0;i<nt;i++)slot.sum[i]+=record.samples[i];
+      slot.n++;slot.halfSum+=half;slot.members.push({index,k});
+      contributing++;
+    });
+  });
+  let corrected=0;
+  groups.forEach(byMid=>{
+    if(byMid.size<3)return;
+    let halfTotal=0,count=0;
+    byMid.forEach(slot=>{halfTotal+=slot.halfSum;count+=slot.n;});
+    const half=Math.max(spacing,halfTotal/Math.max(1,count));
+    const lag=Math.min(byMid.size-1,Math.floor(half/spacing));
+    if(lag<1)return;
+    /* Rho filter for the same reason the migration needs one: a summation
+       operator applied to band-limited data returns the wavelet with the wrong
+       phase and a boosted low end unless the half-derivative goes in first. */
+    const input=new Map();
+    byMid.forEach((slot,index)=>{
+      const mean=new Float32Array(slot.sum.length);
+      for(let i=0;i<mean.length;i++)mean[i]=slot.sum[i]/slot.n;
+      input.set(index,rhoHalfDerivative(mean,slot.dt));
+    });
+    const output=new Map();
+    byMid.forEach((slot,i0)=>{
+      const nt=slot.nt,dt=slot.dt,out=new Float32Array(nt);
+      for(let d=-lag;d<=lag;d++){
+        const source=input.get(i0-d);
+        if(!source)continue;
+        const dy=d*spacing,reach=Math.abs(dy)/half;
+        if(reach>=1)continue;
+        const ratio=Math.sqrt(Math.max(0,1-reach*reach));
+        if(!(ratio>1e-3))continue;
+        const taper=reach<=1-DMO_TAPER?1
+          :Math.max(0,.5*(1+Math.cos(Math.PI*(reach-(1-DMO_TAPER))/DMO_TAPER)));
+        const weight=Math.pow(ratio,DMO_WEIGHT_POWER)*taper;
+        if(weight<=0)continue;
+        for(let a=1;a<nt;a++){
+          const f=(a/ratio);
+          const i1=Math.floor(f);
+          if(i1<0||i1+1>=nt)continue;
+          const w=f-i1;
+          out[a]+=weight*(source[i1]*(1-w)+source[i1+1]*w);
+        }
+      }
+      output.set(i0,out);
+    });
+    /* THE OPERATOR'S ABSOLUTE GAIN IS NOT DERIVED, so it is removed rather than
+       guessed at: each common-offset section is rescaled to the RMS it came in
+       with. DMO then redistributes energy in dip without changing how much
+       there is, which is what it is for.
+
+       A fixed constant was tried first and does not survive real geometry. It
+       was calibrated on a synthetic section -- 60 evenly spaced midpoints, one
+       trace each, full aperture -- where it held a flat reflector to within 4%
+       across half-offsets of 200-600 m. On a real land line, where sections are
+       short, irregularly populated and clipped by the spread, the same constant
+       amplified the zero-dip part of the reflector by 2.28x. Normalising to the
+       section's own energy has no such dependence. */
+    let inputEnergy=0,outputEnergy=0;
+    byMid.forEach((slot,i0)=>{
+      const before=slot.sum,after=output.get(i0);
+      const n=slot.n;
+      for(let a=0;a<slot.nt;a++){
+        const v=before[a]/n;inputEnergy+=v*v;
+        if(after)outputEnergy+=after[a]*after[a];
+      }
+    });
+    const balance=outputEnergy>0?Math.sqrt(inputEnergy/outputEnergy):0;
+    output.forEach(samples=>{for(let a=0;a<samples.length;a++)samples[a]*=balance;});
+    output.forEach((samples,i0)=>{
+      const slot=byMid.get(i0);
+      slot.members.forEach(({index,k})=>{
+        const entry=nmoByIndex.get(index);
+        if(!entry)return;
+        const record=entry.result.correctedRecords[k];
+        entry.result.correctedRecords[k]={...record,samples};
+        corrected++;
+      });
+    });
+  });
+  return {contributing,corrected,groups:groups.size};
 }
 
 /* ---------------- post-stack time migration ---------------- */
@@ -5027,7 +5178,7 @@ function collectSessionState(){
       topMuteEnabled,topMuteT0,topMuteVelocity,filterEnabled,filterCorners:filterCorners.slice(),
       gainMode,agcWindowMs,radonEnabled,radonCutMs,radonMaxMs,
       deconEnabled,deconMode,deconLagMs,deconOperatorMs,deconPrewhiten,
-      migrationAperture,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
+      migrationAperture,dmoEnabled,minFold:document.getElementById('minFold').value,allVelocity:document.getElementById('allVelocity').value,
       depthMigrationAperture,depthDerived:document.getElementById('depthDerived').checked,
       autoPickStride:document.getElementById('autoPickStride').value},
     display:{nmoDisplayGain,nmoDensity,showExactMoveout,wavefieldBoost}
@@ -5168,6 +5319,7 @@ function syncControlsFromState(proc){
     set('depthAperture',String(depthMigrationAperture));
   }
   if(proc&&typeof proc.depthDerived==='boolean')check('depthDerived',proc.depthDerived);
+  if(proc&&typeof proc.dmoEnabled==='boolean'){dmoEnabled=proc.dmoEnabled;check('dmoOn',dmoEnabled);}
   set('gainMode',gainMode);set('agcWindow',agcWindowMs);
   set('radonCut',radonCutMs);set('radonMax',radonMaxMs);check('radonOn',radonEnabled);
   set('deconMode',deconMode);set('deconLag',deconLagMs);set('deconOperator',deconOperatorMs);set('deconPrewhiten',deconPrewhiten);
@@ -6497,6 +6649,13 @@ document.getElementById('cmpBinSize').onchange=e=>{cmpBinSize=Math.max(5,+e.targ
 document.getElementById('buildCmp').onclick=()=>{cmpBinSize=Math.max(5,+document.getElementById('cmpBinSize').value||25);buildCmpBins();setStage('cmp');updateFlow();};
 document.getElementById('prevCmp').onclick=()=>moveCmp(-1);document.getElementById('nextCmp').onclick=()=>moveCmp(1);
 document.getElementById('prevCmpNmo').onclick=()=>moveCmp(-1,'nmo');document.getElementById('nextCmpNmo').onclick=()=>moveCmp(1,'nmo');
+document.getElementById('dmoOn').onchange=e=>{
+  dmoEnabled=e.target.checked;
+  document.getElementById('finalInfo').textContent=dmoEnabled
+    ? 'DMO on. Press NMO + Stack All CMPs to apply it — it runs between NMO and the stack, across midpoints within each common-offset section.'
+    : 'DMO off. Press NMO + Stack All CMPs to restack without it.';
+  updateFlow();
+};
 document.getElementById('processAll').onclick=processAllCMPs;document.getElementById('finalWiggle').onchange=drawFinalSection;
 document.getElementById('finalGain').oninput=e=>{document.getElementById('finalGainLbl').textContent=(+e.target.value).toFixed(1)+'×';drawFinalSection();};
 document.getElementById('finalTimeGain').onchange=drawFinalSection;
@@ -7362,6 +7521,105 @@ function runNumericalChecks(){
     }
     results.push({test:'time-to-depth stretch agrees with the eikonal straight down',
       pass:worst<.02});
+  }
+
+  // --- dip moveout ---------------------------------------------------------
+  /* DMO is checked on a synthetic common-offset section, against the two things
+     the ellipse geometry actually predicts. A FLAT event must come back at its
+     own time and its own amplitude, which is what fixes DMO_SCALE. A DIPPING
+     event must land where the stationary point of the operator puts it, and
+     that position is worth deriving rather than eyeballing: with an input event
+     T(y) = T0 + p y and half-offset h, the stationary condition on the ellipse
+     gives 2g u^2 - u - g = 0 for u = dy/h and g = p h / T(y0), and the output
+     time is sqrt(1 - u^2) (T(y0) - p h u). A first attempt at this test used
+     sqrt(t^2 - p^2 h^2) -- the same derivation with the input event evaluated
+     at the OUTPUT midpoint instead of the stationary one -- and predicted the
+     event would move earlier when it in fact moves later. The operator was
+     right and the prediction was wrong. */
+  {
+    const dt=.002,nt=700,bin=20,mids=80,fw=30;
+    const savedBin=cmpBinSize,savedOrigin=cmpOrigin;
+    cmpBinSize=bin;cmpOrigin=0;
+    const wavelet=(out,t)=>{
+      const centre=Math.round(t/dt);
+      for(let k=-40;k<=40;k++){
+        const a=Math.PI*fw*(k*dt),a2=a*a,i=centre+k;
+        if(i>=0&&i<nt&&a2<50)out[i]+=(1-2*a2)*Math.exp(-a2);
+      }
+    };
+    const section=(half,slope,t0)=>{
+      const map=new Map();
+      for(let i=0;i<mids;i++){
+        const samples=new Float32Array(nt);
+        wavelet(samples,t0+i*bin*slope);
+        map.set(i,{index:i,center:i*bin,records:[{}],
+          result:{correctedRecords:[{samples,nt,dt,sourceReceiverOffset:2*half}],valid:null}});
+      }
+      return map;
+    };
+    const peakNear=(samples,around)=>{
+      const centre=Math.round(around/dt);
+      let bestI=centre,best=0;
+      for(let i=Math.max(0,centre-60);i<=Math.min(nt-1,centre+60);i++){
+        const v=Math.abs(samples[i]);
+        if(v>best){best=v;bestI=i;}
+      }
+      return {t:bestI*dt,amp:best};
+    };
+    const middle=40;
+    /* The rho filter rotates the wavelet by 45 degrees, which moves its peak.
+       Rather than predict that shift from f0 -- a first attempt used a half
+       period, 17 ms, which is four times too generous to catch anything -- it
+       is MEASURED on the flat case and then applied to the dipping ones, so the
+       dip test is comparing positions and not the operator's phase. */
+    let rhoShift=0;
+
+    // a flat reflector passes through at its own amplitude, at every offset
+    {
+      const gains=[200,400,600].map(half=>{
+        const data=section(half,0,.5);
+        const before=peakNear(data.get(middle).result.correctedRecords[0].samples,.5).amp;
+        dmoCorrectAll(data);
+        const after=peakNear(data.get(middle).result.correctedRecords[0].samples,.5).amp;
+        return after/Math.max(1e-12,before);
+      });
+      /* Energy is preserved per section, so what a flat reflector loses at its
+         PEAK is what the operator smears into its own smile: measured at 0.65,
+         0.81 and 0.85 of the input peak for half-offsets of 200, 400 and 600 m.
+         The loss is largest at short offset, where the aperture is smallest
+         relative to the wavelet. The band below is that measurement, not a
+         target -- a flat reflector coming back at full amplitude would mean the
+         operator was doing nothing at all. */
+      results.push({test:'DMO returns a flat reflector at its measured amplitude',
+        pass:gains.every(g=>g>.55&&g<1.05)&&gains[2]>gains[0]});
+    }
+    // and at its own time
+    {
+      const data=section(400,0,.5);
+      dmoCorrectAll(data);
+      const after=peakNear(data.get(middle).result.correctedRecords[0].samples,.5);
+      rhoShift=.5-after.t;
+      results.push({test:'DMO leaves a flat reflector where it was',
+        pass:Math.abs(rhoShift)<1/(4*fw)});
+    }
+    // a dipping event lands on the ellipse's stationary point
+    {
+      let worst=0,checked=0;
+      [.0002,.0004,.0006].forEach(slope=>{
+        const half=400,data=section(half,slope,.5);
+        const atMid=.5+middle*bin*slope;
+        dmoCorrectAll(data);
+        const after=peakNear(data.get(middle).result.correctedRecords[0].samples,atMid);
+        const g=slope*half/atMid;
+        const u=(1-Math.sqrt(1+8*g*g))/(4*g);
+        const predicted=Math.sqrt(1-u*u)*(atMid-slope*half*u);
+        worst=Math.max(worst,Math.abs(after.t+rhoShift-predicted));
+        checked++;
+      });
+      results.push({test:'DMO moves a dipping event to the ellipse stationary point',
+        pass:checked===3&&worst<3.01*dt});
+    }
+    cmpBinSize=savedBin;cmpOrigin=savedOrigin;
   }
 
   // --- f-k transform and fan filter ----------------------------------------
